@@ -361,17 +361,6 @@ int main() {
 
 	load_font("Fonts/Rubik/Rubik-Medium.ttf", 25, 1024, &global.font);
 
-
-
-	SDL_Rect rect;
-	rect.x = 250;
-	rect.y = 150;
-	rect.w = 180;
-	rect.h = 48;
-
-	int dx = 2;
-	int dy = 2;
-
 	float zoom_level = 1;
 
 	int window_width;
@@ -458,32 +447,9 @@ int main() {
 			global.offset_y += 8;
 		}
 
-		rect.x += dx;
-		rect.y += dy;
-
-		if (rect.x > (window_width + rect.w)) {
-			dx = -2;
-		}
-		else if (rect.x <= 0) {
-			dx = 2;
-		}
-
-		if (rect.y > (window_height + rect.h)) {
-			dy = -2;
-		}
-		else if (rect.y <= 0) {
-			dy = 2;
-		}
-
-
-
 		// SDL_SetRenderDrawColor(renderer, 187, 185, 173, 255);
 		SDL_SetRenderDrawColor(renderer, 229, 226, 210, 255);
 		SDL_RenderClear(renderer);
-
-		if (button("Hej med dig!", &rect)) {
-			quit = true;
-		}
 
 		for (int y = 0; y < map_height; ++y) {
 			for (int x = 0; x < map_width; ++x) {
