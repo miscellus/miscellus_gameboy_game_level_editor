@@ -163,8 +163,8 @@ static void compute_pixels_from_gameboy_tile_format(
 
 
 typedef enum Application_Mode {
-	APP_MODE_DRAW_TILES,
-	APP_MODE_SELECT_TILE,
+	APP_MODE_VIEW = 0,
+	APP_MODE_DRAW_TILES = 1,
 } Application_Mode;
 
 int main() {
@@ -220,11 +220,15 @@ int main() {
 
 	#define level_width 32
 	#define level_height 32
-	s32 level_map[level_height][level_width] = {{124, 24, 5, 2}};
+	s32 level_map[level_height][level_width];
+
+	for (s32 y = 0; y < level_height; ++y)
+		for (s32 x = 0; x < level_width; ++x)
+			level_map[y][x] = 1000;
 
 	s32 draw_tile_index = 5000;
 
-	Application_Mode mode = APP_MODE_DRAW_TILES;
+	Application_Mode mode = APP_MODE_VIEW;
 
 	SDL_Event e;
 	bool quit = false;
@@ -235,8 +239,24 @@ int main() {
 				quit = true;
 			}
 			else if (e.type == SDL_KEYDOWN){
-				if (e.key.keysym.sym == SDLK_q || e.key.keysym.sym == SDLK_ESCAPE) {
-					quit = true;
+				
+				switch(e.key.keysym.sym) {
+
+					case SDLK_ESCAPE:
+					case SDLK_q: {
+						quit = true;
+					}
+					break;
+
+					case SDLK_TAB: mode = APP_MODE_DRAW_TILES - mode; break;
+				}
+			}
+			else if(e.type == SDL_MOUSEWHEEL) {
+				if(e.wheel.y > 0) {
+					draw_tile_index = (draw_tile_index + 1) % tile_map.tile_count;
+				}
+				else if(e.wheel.y < 0) {
+					draw_tile_index = (draw_tile_index - 1) % tile_map.tile_count;
 				}
 			}
 		}
@@ -249,7 +269,8 @@ int main() {
 
 		SDL_GetWindowSize(window, &window_width, &window_height);
 		mouse_flags = SDL_GetMouseState(&mouse_x, &mouse_y);
-		(void)mouse_flags;
+
+		b32 mouse_left_clicked = mouse_flags & SDL_BUTTON(SDL_BUTTON_LEFT);
 
 		s32 pixel_scale_factor = window_height/256;
 		if (pixel_scale_factor <= 0) pixel_scale_factor = 1;
@@ -271,6 +292,7 @@ int main() {
 
 		for (s32 y = 0; y < level_height; ++y) {
 			for (s32 x = 0; x < level_width; ++x) {
+
 				s32 tile_index = level_map[y][x];
 
 				SDL_Rect source_rect = {
@@ -289,7 +311,11 @@ int main() {
 				
 				SDL_RenderCopy(renderer, tile_map_texture, &source_rect, &dest_rect);
 
-				if (x == hot_tile_x && y == hot_tile_y) {
+				if (mode == APP_MODE_DRAW_TILES && x == hot_tile_x && y == hot_tile_y) {
+					if (mouse_left_clicked) {
+						level_map[y][x] = draw_tile_index;
+					}
+
 					SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);
 					
 					SDL_Rect hot_rect = {
