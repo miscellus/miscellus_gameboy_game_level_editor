@@ -5,25 +5,26 @@
 #include <math.h>
 #include <SDL2/SDL.h>
 
-typedef unsigned char u8;
 typedef char s8;
-typedef unsigned short u16;
 typedef short s16;
-typedef unsigned int u32;
 typedef int s32;
-typedef unsigned long long u64;
 typedef long long s64;
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef unsigned int u32;
+typedef unsigned long long u64;
 
 typedef u32 b32;
 
-typedef size_t uptr;
-typedef ssize_t sptr;
+typedef u64 umm;
+typedef s64 smm;
 
-typedef char check_size8[sizeof(u8)==1&&sizeof(s8)==1 ? 1 : -1];
-typedef char check_size16[sizeof(u16)==2&&sizeof(s16)==2 ? 1 : -1];
-typedef char check_size32[sizeof(u32)==4&&sizeof(s32)==4 ? 1 : -1];
-typedef char check_size64[sizeof(u64)==8&&sizeof(s64)==8 ? 1 : -1];
-typedef char check_sizeptr[sizeof(uptr)==sizeof((void *)0) ? 1 : -1];
+typedef int check_size8[sizeof(u8)==1&&sizeof(s8)==1 ? 1 : -1];
+typedef int check_size16[sizeof(u16)==2&&sizeof(s16)==2 ? 1 : -1];
+typedef int check_size32[sizeof(u32)==4&&sizeof(s32)==4 ? 1 : -1];
+typedef int check_size64[sizeof(u64)==8&&sizeof(s64)==8 ? 1 : -1];
+typedef int check_sizeumm[sizeof(umm)==sizeof((void *)0) ? 1 : -1];
+typedef int check_sizesmm[sizeof(smm)==sizeof((void *)0) ? 1 : -1];
 
 
 #define GAMEBOY_TILE_WIDTH 8
@@ -32,13 +33,13 @@ typedef char check_sizeptr[sizeof(uptr)==sizeof((void *)0) ? 1 : -1];
 #define PIXEL_SCALE_FACTOR 3
 
 typedef struct Length_Buffer {
-	sptr length;
+	umm length;
 	u8 *data;
 } Length_Buffer;
 
 typedef struct Tile_Map {
-	s32 tile_count;
-	s32 pixels_per_row;
+	u32 tile_count;
+	u32 pixels_per_row;
 	u32 *pixels;
 } Tile_Map;
 
@@ -104,7 +105,7 @@ static Tile_Map prepare_tile_map(Length_Buffer raw_data_buffer) {
 
 	Tile_Map result = {0};
 
-	sptr rounded_size = raw_data_buffer.length;
+	umm rounded_size = raw_data_buffer.length;
 	rounded_size = rounded_size & ~(GAMEBOY_BYTES_PER_TILE - 1); // Round down to nearest multiple of GAMEBOY_BYTES_PER_TILE
 
 	result.tile_count = rounded_size / GAMEBOY_BYTES_PER_TILE;
@@ -121,7 +122,7 @@ static void compute_pixels_from_gameboy_tile_format(
 	Tile_Map tile_map,
 	Length_Buffer raw_game_boy_tile_data)
 {
-	// 8-bit sdl surfaces are indexed (palletised)	
+
 	static const u32 game_boy_palette[4] = {
 		0xc4cfa1ff,
 		0x8b956dff,
@@ -131,20 +132,19 @@ static void compute_pixels_from_gameboy_tile_format(
 
 	s32 pixels_per_row = tile_map.pixels_per_row;
 
-	u8 *at = raw_game_boy_tile_data.data;
-	u8 *end = at + tile_map.tile_count * GAMEBOY_BYTES_PER_TILE;
-	u32 *pixels = tile_map.pixels;
+	u8 *source_at = raw_game_boy_tile_data.data;
+	u8 *source_end = source_at + tile_map.tile_count * GAMEBOY_BYTES_PER_TILE;
 
 	for (int y = 0; y < pixels_per_row; y += GAMEBOY_TILE_WIDTH) {
 		for (int x = 0; x < pixels_per_row; x += GAMEBOY_TILE_WIDTH) {
 
-			if (at >= end) return;
+			if (source_at >= source_end) return;
 
-			u32 *line = &pixels[y * pixels_per_row + x];
+			u32 *line = &tile_map.pixels[y * pixels_per_row + x];
 
 			for (int tile_y = 0; tile_y < GAMEBOY_TILE_WIDTH; ++tile_y) {
-				u8  low_byte = *at++;
-				u8 high_byte = *at++;
+				u8  low_byte = *source_at++;
+				u8 high_byte = *source_at++;
 
 				for (int tile_x = 0; tile_x < GAMEBOY_TILE_WIDTH; ++tile_x) {
 					u8 color = 0;
@@ -194,7 +194,7 @@ int main() {
 	Tile_Map tile_map;
 	SDL_Texture *tile_map_texture;
 	{
-		Length_Buffer tile_file_buffer = read_entire_file("/home/jakob/own/dev/GB/ROMs/Donkey Kong (World) (Rev A) (SGB Enhanced).gb");
+		Length_Buffer tile_file_buffer = read_entire_file("/home/jakob/own/dev/GB/ROMs/Tetris (World) (Rev A).gb");
 		tile_map = prepare_tile_map(tile_file_buffer);
 
 		tile_map_texture = SDL_CreateTexture(
@@ -228,7 +228,7 @@ int main() {
 
 	s32 draw_tile_index = 5000;
 
-	Application_Mode mode = APP_MODE_VIEW;
+	Application_Mode mode = APP_MODE_DRAW_TILES;
 
 	SDL_Event e;
 	bool quit = false;

@@ -4,7 +4,6 @@
 #include <math.h>
 #include <SDL2/SDL.h>
 
-
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
@@ -13,12 +12,15 @@ typedef char s8;
 typedef short s16;
 typedef int s32;
 typedef long long s64;
+typedef u64 umm;
+typedef s64 smm;
 
-
-typedef char check_size8[sizeof(u8)==1&&sizeof(s8)==1 ? 1 : -1];
-typedef char check_size16[sizeof(u16)==2&&sizeof(s16)==2 ? 1 : -1];
-typedef char check_size32[sizeof(u32)==4&&sizeof(s32)==4 ? 1 : -1];
-typedef char check_size64[sizeof(u64)==8&&sizeof(s64)==8 ? 1 : -1];
+typedef int check_size8[sizeof(u8)==1&&sizeof(s8)==1 ? 1 : -1];
+typedef int check_size16[sizeof(u16)==2&&sizeof(s16)==2 ? 1 : -1];
+typedef int check_size32[sizeof(u32)==4&&sizeof(s32)==4 ? 1 : -1];
+typedef int check_size64[sizeof(u64)==8&&sizeof(s64)==8 ? 1 : -1];
+typedef int check_sizeumm[sizeof(umm)==sizeof((void *)0) ? 1 : -1];
+typedef int check_sizesmm[sizeof(smm)==sizeof((void *)0) ? 1 : -1];
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
@@ -143,7 +145,6 @@ static bool button(char *label, SDL_Rect *rect) {
 		SDL_SetRenderDrawColor(global.renderer, 57, 178, 190, 255);
 	}
 	SDL_RenderFillRect(global.renderer, rect);
-
 
 	stbtt_print(rect->x, rect->y, label);
 
