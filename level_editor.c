@@ -54,6 +54,12 @@ typedef enum Application_Mode {
 	COUNT_APP_MODE = 4
 } Application_Mode;
 
+typedef struct View {
+	float zoom;
+	float offset_x;
+	float offset_y;
+} View;
+
 typedef struct Application_State {
 	Application_Mode mode;
 	u32 draw_tile_index;
@@ -69,8 +75,8 @@ typedef struct Application_State {
 	s32 mouse_y;
 	u32 mouse_flags;
 
-	float zoom;
-	float view_offset_x, view_offset_y;
+	View view_edit;
+	View view_pick;
 
 	struct {
 		b32 view_left;
@@ -198,11 +204,20 @@ static void compute_pixels_from_gameboy_tile_format(
 }
 
 
+static inline View *get_current_view(Application_State *app_state) {
+	if (app_state->mode == APP_MODE_EDIT_LEVEL) {
+		return &app_state->view_edit;
+	}
+	else if (app_state->mode == APP_MODE_PICK_TILE) {
+		return &app_state->view_pick;
+	}
+}
+
 void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 
-	float zoom = app_state->zoom;
+	View view = *get_current_view(app_state);
 
-	SDL_RenderSetScale(renderer, zoom, zoom);
+	SDL_RenderSetScale(renderer, view.zoom, view.zoom);
 
 	b32 mouse_left_clicked = app_state->mouse_flags & SDL_BUTTON(SDL_BUTTON_LEFT);
 
@@ -216,11 +231,11 @@ void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 
 	const u32 level_width_pixels = level_width * scaled_tile_width;
 
-	const s32 x_offset = (app_state->window_width/2 - level_width_pixels/2) - app_state->view_offset_x;
-	const s32 y_offset = (app_state->window_height/2 - level_width_pixels/2) - app_state->view_offset_y;
+	const s32 x_offset = (app_state->window_width/2 - level_width_pixels/2) - view.offset_x;
+	const s32 y_offset = (app_state->window_height/2 - level_width_pixels/2) - view.offset_y;
 
-	u32 hot_tile_x = ((app_state->mouse_x / app_state->zoom) - x_offset) / scaled_tile_width;
-	u32 hot_tile_y = ((app_state->mouse_y / app_state->zoom) - y_offset) / scaled_tile_width;
+	u32 hot_tile_x = ((app_state->mouse_x / view.zoom) - x_offset) / scaled_tile_width;
+	u32 hot_tile_y = ((app_state->mouse_y / view.zoom) - y_offset) / scaled_tile_width;
 
 	u32 draw_tile_index = app_state->draw_tile_index;
 
@@ -299,6 +314,9 @@ void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 			}
 		}
 		break;
+
+		default:
+			assert(0);
 	}
 
 	SDL_RenderSetScale(renderer, 1, 1);
@@ -332,9 +350,8 @@ int main() {
 	Application_State app_state = {0};
 	app_state.mode = APP_MODE_EDIT_LEVEL;
 	app_state.draw_tile_index = 4;
-	app_state.zoom = 1;
-	app_state.view_offset_x = 0;
-	app_state.view_offset_y = 0;
+	app_state.view_edit.zoom = 1;
+	app_state.view_pick.zoom = 1;
 
 	for (s32 y = 0; y < level_height; ++y)
 		for (s32 x = 0; x < level_width; ++x)
@@ -368,6 +385,9 @@ int main() {
 	SDL_Event e;
 	b32 quit = false;
 	while (!quit){
+
+		View *view = get_current_view(&app_state);
+		
 		while (SDL_PollEvent(&e)) {
 
 			if (e.type == SDL_QUIT){
@@ -384,8 +404,8 @@ int main() {
 					break;
 
 					case SDLK_TAB: {
-						++app_state.mode;
-						if (app_state.mode > COUNT_APP_MODE) app_state.mode = 0;
+						if (app_state.mode == APP_MODE_EDIT_LEVEL) app_state.mode = APP_MODE_PICK_TILE;
+						else app_state.mode = APP_MODE_EDIT_LEVEL;
 					}
 					break;
 
@@ -405,28 +425,29 @@ int main() {
 			}
 			else if(e.type == SDL_MOUSEWHEEL) {
 
-				float world_mouse_x = (float)app_state.mouse_x / (float)app_state.zoom + app_state.view_offset_x;
-				float world_mouse_y = (float)app_state.mouse_y / (float)app_state.zoom + app_state.view_offset_y;
+				float world_mouse_x = (float)app_state.mouse_x / (float)view->zoom + view->offset_x;
+				float world_mouse_y = (float)app_state.mouse_y / (float)view->zoom + view->offset_y;
 				
 				if(e.wheel.y > 0) {
-					app_state.draw_tile_index = (app_state.draw_tile_index + 1) % app_state.tile_map.tile_count;
+					//app_state.draw_tile_index = (app_state.draw_tile_index + 1) % app_state.tile_map.tile_count;
 
-					app_state.zoom *= 1.1;
-					if (app_state.zoom > 10) {app_state.zoom = 10;}
+					view->zoom *= 1.2;
+					if (view->zoom > 10) {view->zoom = 10;}
 				}
 				else if(e.wheel.y < 0) {
-					app_state.draw_tile_index = (app_state.draw_tile_index - 1) % app_state.tile_map.tile_count;
-					app_state.zoom *= 0.9;
-					if (app_state.zoom < 0.5) app_state.zoom = 0.5;
+					//app_state.draw_tile_index = (app_state.draw_tile_index - 1) % app_state.tile_map.tile_count;
+					
+					view->zoom *= 0.8;
+					if (view->zoom < 0.1) view->zoom = 0.1;
 				}
 
 				// Adjust view position (Zoom like in Gimp)
-				float world_view_width = (float)app_state.window_width / (float)app_state.zoom;
-				float world_view_height = (float)app_state.window_height / (float)app_state.zoom;
+				float world_view_width = (float)app_state.window_width / (float)view->zoom;
+				float world_view_height = (float)app_state.window_height / (float)view->zoom;
 				float x01 = (float)app_state.mouse_x / (float)app_state.window_width;
 				float y01 = (float)app_state.mouse_y / (float)app_state.window_height;
-				app_state.view_offset_x = world_mouse_x - x01*world_view_width; 
-				app_state.view_offset_y = world_mouse_y - y01*world_view_height;
+				view->offset_x = world_mouse_x - x01*world_view_width; 
+				view->offset_y = world_mouse_y - y01*world_view_height;
 			}
 
 		}
@@ -434,12 +455,12 @@ int main() {
 		SDL_GetWindowSize(window, &app_state.window_width, &app_state.window_height);
 		app_state.mouse_flags = SDL_GetMouseState(&app_state.mouse_x, &app_state.mouse_y);
 
-		const float view_speed = 10.0f / app_state.zoom; 
+		const float view_speed = 10.0f / view->zoom; 
 
-		if (app_state.input.view_left) app_state.view_offset_x -= view_speed;
-		if (app_state.input.view_right) app_state.view_offset_x += view_speed;
-		if (app_state.input.view_up) app_state.view_offset_y -= view_speed;
-		if (app_state.input.view_down) app_state.view_offset_y += view_speed;
+		if (app_state.input.view_left) view->offset_x -= view_speed;
+		if (app_state.input.view_right) view->offset_x += view_speed;
+		if (app_state.input.view_up) view->offset_y -= view_speed;
+		if (app_state.input.view_down) view->offset_y += view_speed;
 
 		SDL_SetRenderDrawColor(renderer, 128, 128, 128, 255);
 		SDL_RenderClear(renderer);
