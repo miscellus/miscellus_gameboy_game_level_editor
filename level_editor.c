@@ -4,6 +4,9 @@
 #include <math.h>
 #include <SDL2/SDL.h>
 
+#define MFD_IMPLEMENTATION
+#include "miscellus_file_dialog.h"
+
 typedef char s8;
 typedef short s16;
 typedef int s32;
@@ -45,6 +48,13 @@ typedef struct Tile_Map {
 	u32 *pixels;
 } Tile_Map;
 
+typedef struct Rectangular_Selection {
+	u32 min_tile_x;
+	u32 min_tile_y;
+	u32 max_tile_x;
+	u32 max_tile_y;
+} Rectangular_Selection;
+
 
 typedef enum Application_Mode {
 	APP_MODE_VIEW = 0,
@@ -62,12 +72,18 @@ typedef struct View {
 
 typedef struct Application_State {
 	Application_Mode mode;
+	View view_edit;
+	View view_pick;
+
+	Rectangular_Selection selection;
+
 	u32 draw_tile_index;
 	Tile_Map tile_map;
 	SDL_Texture *tile_map_texture;
 	#define level_width 32
 	#define level_height 32
 	u32 level_map[level_height][level_width];
+	b32 collision_map[level_height][level_width];
 
 	s32 window_width;
 	s32 window_height;
@@ -75,15 +91,10 @@ typedef struct Application_State {
 	s32 mouse_y;
 	u32 mouse_flags;
 
-	View view_edit;
-	View view_pick;
-
-	struct {
-		b32 view_left;
-		b32 view_right;
-		b32 view_up;
-		b32 view_down;
-	} input;
+	b32 view_left;
+	b32 view_right;
+	b32 view_up;
+	b32 view_down;
 } Application_State;
 
 
@@ -211,6 +222,8 @@ static inline View *get_current_view(Application_State *app_state) {
 	else if (app_state->mode == APP_MODE_PICK_TILE) {
 		return &app_state->view_pick;
 	}
+
+	return NULL;
 }
 
 void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
@@ -239,6 +252,9 @@ void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 
 	u32 draw_tile_index = app_state->draw_tile_index;
 
+	SDL_Rect dest_rect;
+	SDL_Rect source_rect;
+
 	switch (app_state->mode) {
 		case APP_MODE_VIEW:
 		case APP_MODE_EDIT_LEVEL: {
@@ -247,14 +263,14 @@ void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 
 					u32 tile_index = app_state->level_map[y][x];
 
-					SDL_Rect source_rect = {
+					source_rect = (SDL_Rect){
 						tile_index % tiles_per_row * GAMEBOY_TILE_WIDTH,
 						tile_index / tiles_per_row * GAMEBOY_TILE_WIDTH,
 						GAMEBOY_TILE_WIDTH,
 						GAMEBOY_TILE_WIDTH,
 					};
 
-					SDL_Rect dest_rect = {
+					dest_rect = (SDL_Rect){
 						x * scaled_tile_width + x_offset,
 						y * scaled_tile_width + y_offset,
 						scaled_tile_width,
@@ -284,6 +300,19 @@ void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 					}
 				}
 			}
+
+			Rectangular_Selection selection = app_state->selection;
+			dest_rect.x = selection.min_tile_x * scaled_tile_width + x_offset;
+			dest_rect.y = selection.min_tile_y * scaled_tile_width + y_offset;
+			dest_rect.w = (selection.max_tile_x - selection.min_tile_x) * scaled_tile_width;
+			dest_rect.h = (selection.max_tile_y - selection.min_tile_y) * scaled_tile_width;
+
+			SDL_SetRenderDrawColor(renderer, 0, 150, 200, 192);
+			SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
+			SDL_RenderFillRect(renderer, &dest_rect);
+			SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+
 		}
 		break;
 
@@ -322,8 +351,47 @@ void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 	SDL_RenderSetScale(renderer, 1, 1);
 }
 
+static b32 load_tile_palette(Application_State *app_state, SDL_Renderer *renderer, char *palette_file_path) {
+	Length_Buffer tile_file_buffer = read_entire_file(palette_file_path);
 
-int main() {
+	if (tile_file_buffer.data == NULL) {
+		return false;
+	}
+
+	// Cleanup after potential previous texture
+	if (app_state->tile_map_texture) {
+		SDL_DestroyTexture(app_state->tile_map_texture);
+	}
+
+	app_state->tile_map = prepare_tile_map(tile_file_buffer);
+
+
+	app_state->tile_map_texture = SDL_CreateTexture(
+		renderer,
+		SDL_PIXELFORMAT_RGBA8888,
+		SDL_TEXTUREACCESS_STREAMING,
+		app_state->tile_map.pixels_per_row,
+		app_state->tile_map.pixels_per_row);
+
+	void *texture_pixels;
+	s32 pitch;
+
+	s32 error = SDL_LockTexture(app_state->tile_map_texture, NULL, &texture_pixels, &pitch);
+	if(error) {
+		panic("Could not lock tile map texture: %s\n", SDL_GetError());
+	}
+
+	app_state->tile_map.pixels = texture_pixels;
+	compute_pixels_from_gameboy_tile_format(app_state->tile_map, tile_file_buffer);
+	SDL_UnlockTexture(app_state->tile_map_texture);
+
+	return true;
+}
+
+int main(int argc, char **argv) {
+	if (argc < 2) {
+		panic("%s expects the path to a tile palette file as the first argument.\n", argv[0]);
+	}
 
 	if (SDL_Init(SDL_INIT_VIDEO) != 0) {
 		panic("SDL_Init Error: %s\n", SDL_GetError());
@@ -352,42 +420,22 @@ int main() {
 	app_state.draw_tile_index = 4;
 	app_state.view_edit.zoom = 1;
 	app_state.view_pick.zoom = 1;
+	app_state.selection = (Rectangular_Selection){10, 10, 15, 20};
 
-	for (s32 y = 0; y < level_height; ++y)
-		for (s32 x = 0; x < level_width; ++x)
-			app_state.level_map[y][x] = 3144;
-	
-	{
-		Length_Buffer tile_file_buffer = read_entire_file("/home/jakob/own/dev/GB/ROMs/Tetris (World) (Rev A).gb");
-		app_state.tile_map = prepare_tile_map(tile_file_buffer);
-
-		app_state.tile_map_texture = SDL_CreateTexture(
-			renderer,
-			SDL_PIXELFORMAT_RGBA8888,
-			SDL_TEXTUREACCESS_STREAMING,
-			app_state.tile_map.pixels_per_row,
-			app_state.tile_map.pixels_per_row);
-
-		void *texture_pixels;
-		s32 pitch;
-
-		s32 error = SDL_LockTexture(app_state.tile_map_texture, NULL, &texture_pixels, &pitch);
-		if(error) {
-			panic("Could not lock tile map texture: %s\n", SDL_GetError());
+	for (s32 y = 0; y < level_height; ++y) {
+		for (s32 x = 0; x < level_width; ++x) {
+			app_state.level_map[y][x] = 0;
 		}
-
-		app_state.tile_map.pixels = texture_pixels;
-		compute_pixels_from_gameboy_tile_format(app_state.tile_map, tile_file_buffer);
-		SDL_UnlockTexture(app_state.tile_map_texture);
 	}
-
+	
+	load_tile_palette(&app_state, renderer, argv[1]);
 
 	SDL_Event e;
 	b32 quit = false;
 	while (!quit){
 
 		View *view = get_current_view(&app_state);
-		
+
 		while (SDL_PollEvent(&e)) {
 
 			if (e.type == SDL_QUIT){
@@ -403,24 +451,35 @@ int main() {
 					}
 					break;
 
+					case SDLK_o: {
+						if (e.key.keysym.mod & KMOD_CTRL) {
+							char file_path[1024];
+
+							if (miscellus_file_dialog(file_path, 1024)) {
+								load_tile_palette(&app_state, renderer, file_path);
+							}
+						}
+					}
+					break;
+
 					case SDLK_TAB: {
 						if (app_state.mode == APP_MODE_EDIT_LEVEL) app_state.mode = APP_MODE_PICK_TILE;
 						else app_state.mode = APP_MODE_EDIT_LEVEL;
 					}
 					break;
 
-					case SDLK_LEFT: app_state.input.view_left = true; break;
-					case SDLK_RIGHT: app_state.input.view_right = true; break;
-					case SDLK_UP: app_state.input.view_up = true; break;
-					case SDLK_DOWN: app_state.input.view_down = true; break;
+					case SDLK_LEFT: app_state.view_left = true; break;
+					case SDLK_RIGHT: app_state.view_right = true; break;
+					case SDLK_UP: app_state.view_up = true; break;
+					case SDLK_DOWN: app_state.view_down = true; break;
 				}
 			}
 			else if (e.type == SDL_KEYUP){
 				switch(e.key.keysym.sym) {
-					case SDLK_LEFT: app_state.input.view_left = false; break;
-					case SDLK_RIGHT: app_state.input.view_right = false; break;
-					case SDLK_UP: app_state.input.view_up = false; break;
-					case SDLK_DOWN: app_state.input.view_down = false; break;
+					case SDLK_LEFT: app_state.view_left = false; break;
+					case SDLK_RIGHT: app_state.view_right = false; break;
+					case SDLK_UP: app_state.view_up = false; break;
+					case SDLK_DOWN: app_state.view_down = false; break;
 				}
 			}
 			else if(e.type == SDL_MOUSEWHEEL) {
@@ -449,18 +508,30 @@ int main() {
 				view->offset_x = world_mouse_x - x01*world_view_width; 
 				view->offset_y = world_mouse_y - y01*world_view_height;
 			}
+			else if (e.type == SDL_DROPFILE) {
+				char *dropped_file_path = e.drop.file;
+				load_tile_palette(&app_state, renderer, dropped_file_path);
+				SDL_free(dropped_file_path);
+			}
+			else if (e.type == SDL_MOUSEBUTTONDOWN) { 
+				if (e.button.button == SDL_BUTTON_LEFT) {
+					// if (app_state.)
+					// app_state.is_selecting = true;
+					// app_state.selection.min_tile_x = 
+				}
+			}
 
 		}
 
 		SDL_GetWindowSize(window, &app_state.window_width, &app_state.window_height);
 		app_state.mouse_flags = SDL_GetMouseState(&app_state.mouse_x, &app_state.mouse_y);
 
-		const float view_speed = 10.0f / view->zoom; 
+		const float view_speed = 16.0f / view->zoom;
 
-		if (app_state.input.view_left) view->offset_x -= view_speed;
-		if (app_state.input.view_right) view->offset_x += view_speed;
-		if (app_state.input.view_up) view->offset_y -= view_speed;
-		if (app_state.input.view_down) view->offset_y += view_speed;
+		if (app_state.view_left) view->offset_x -= view_speed;
+		if (app_state.view_right) view->offset_x += view_speed;
+		if (app_state.view_up) view->offset_y -= view_speed;
+		if (app_state.view_down) view->offset_y += view_speed;
 
 		SDL_SetRenderDrawColor(renderer, 128, 128, 128, 255);
 		SDL_RenderClear(renderer);
