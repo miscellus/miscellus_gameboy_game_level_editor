@@ -70,12 +70,23 @@ typedef struct View {
 	float offset_y;
 } View;
 
+typedef enum Interaction_Flags {
+	INACT_SELECTING = 0x1,
+	INACT_DRAGGING = 0x2,
+	INACT_EYEDROPPER = 0x4,
+} Interaction_Flags;
+
 typedef struct Application_State {
 	Application_Mode mode;
 	View view_edit;
 	View view_pick;
 
-	Rectangular_Selection selection;
+	SDL_Rect selection;
+	
+	Interaction_Flags interaction_flags;
+
+	s32 drag_start_x;
+	s32 drag_start_y;
 
 	u32 draw_tile_index;
 	Tile_Map tile_map;
@@ -244,11 +255,19 @@ void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 
 	const u32 level_width_pixels = level_width * scaled_tile_width;
 
-	const s32 x_offset = (app_state->window_width/2 - level_width_pixels/2) - view.offset_x;
-	const s32 y_offset = (app_state->window_height/2 - level_width_pixels/2) - view.offset_y;
+	s32 x_offset = (app_state->window_width/2 - level_width_pixels/2) - view.offset_x;
+	s32 y_offset = (app_state->window_height/2 - level_width_pixels/2) - view.offset_y;
 
-	u32 hot_tile_x = ((app_state->mouse_x / view.zoom) - x_offset) / scaled_tile_width;
-	u32 hot_tile_y = ((app_state->mouse_y / view.zoom) - y_offset) / scaled_tile_width;
+	float zoomed_mouse_x = ((float)app_state->mouse_x / (float)view.zoom);
+	float zoomed_mouse_y = ((float)app_state->mouse_y / (float)view.zoom);
+
+	if (app_state->interaction_flags & INACT_DRAGGING) {
+		x_offset += zoomed_mouse_x + view.offset_x - app_state->drag_start_x;
+		y_offset += zoomed_mouse_y + view.offset_y - app_state->drag_start_y;
+	}
+
+	u32 hot_tile_x = (zoomed_mouse_x - x_offset) / scaled_tile_width;
+	u32 hot_tile_y = (zoomed_mouse_y - y_offset) / scaled_tile_width;
 
 	u32 draw_tile_index = app_state->draw_tile_index;
 
@@ -301,18 +320,22 @@ void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
 				}
 			}
 
-			Rectangular_Selection selection = app_state->selection;
-			dest_rect.x = selection.min_tile_x * scaled_tile_width + x_offset;
-			dest_rect.y = selection.min_tile_y * scaled_tile_width + y_offset;
-			dest_rect.w = (selection.max_tile_x - selection.min_tile_x) * scaled_tile_width;
-			dest_rect.h = (selection.max_tile_y - selection.min_tile_y) * scaled_tile_width;
+			if (app_state->interaction_flags & INACT_SELECTING) {
+				SDL_Rect selection = app_state->selection;
 
-			SDL_SetRenderDrawColor(renderer, 0, 150, 200, 192);
-			SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
-			SDL_RenderFillRect(renderer, &dest_rect);
-			SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+				selection.x *= scaled_tile_width;
+				selection.y *= scaled_tile_width;
+				selection.w *= scaled_tile_width;
+				selection.h *= scaled_tile_width;
 
+				selection.x += x_offset;
+				selection.y += y_offset;
 
+				SDL_SetRenderDrawColor(renderer, 0, 150, 200, 192);
+				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
+				SDL_RenderFillRect(renderer, &selection);
+				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+			}
 		}
 		break;
 
@@ -420,7 +443,7 @@ int main(int argc, char **argv) {
 	app_state.draw_tile_index = 4;
 	app_state.view_edit.zoom = 1;
 	app_state.view_pick.zoom = 1;
-	app_state.selection = (Rectangular_Selection){10, 10, 15, 20};
+	app_state.selection = (SDL_Rect){10, 10, 5, 10};
 
 	for (s32 y = 0; y < level_height; ++y) {
 		for (s32 x = 0; x < level_width; ++x) {
@@ -434,7 +457,12 @@ int main(int argc, char **argv) {
 	b32 quit = false;
 	while (!quit){
 
+		SDL_GetWindowSize(window, &app_state.window_width, &app_state.window_height);
+		app_state.mouse_flags = SDL_GetMouseState(&app_state.mouse_x, &app_state.mouse_y);
+
 		View *view = get_current_view(&app_state);
+		float world_mouse_x = (float)app_state.mouse_x / (float)view->zoom + view->offset_x;
+		float world_mouse_y = (float)app_state.mouse_y / (float)view->zoom + view->offset_y;
 
 		while (SDL_PollEvent(&e)) {
 
@@ -482,20 +510,13 @@ int main(int argc, char **argv) {
 					case SDLK_DOWN: app_state.view_down = false; break;
 				}
 			}
-			else if(e.type == SDL_MOUSEWHEEL) {
-
-				float world_mouse_x = (float)app_state.mouse_x / (float)view->zoom + view->offset_x;
-				float world_mouse_y = (float)app_state.mouse_y / (float)view->zoom + view->offset_y;
+			else if(e.type == SDL_MOUSEWHEEL && !(app_state.interaction_flags & INACT_SELECTING)) {
 				
 				if(e.wheel.y > 0) {
-					//app_state.draw_tile_index = (app_state.draw_tile_index + 1) % app_state.tile_map.tile_count;
-
 					view->zoom *= 1.2;
 					if (view->zoom > 10) {view->zoom = 10;}
 				}
 				else if(e.wheel.y < 0) {
-					//app_state.draw_tile_index = (app_state.draw_tile_index - 1) % app_state.tile_map.tile_count;
-					
 					view->zoom *= 0.8;
 					if (view->zoom < 0.1) view->zoom = 0.1;
 				}
@@ -514,17 +535,25 @@ int main(int argc, char **argv) {
 				SDL_free(dropped_file_path);
 			}
 			else if (e.type == SDL_MOUSEBUTTONDOWN) { 
-				if (e.button.button == SDL_BUTTON_LEFT) {
+				if (e.button.button == SDL_BUTTON_MIDDLE) {
 					// if (app_state.)
-					// app_state.is_selecting = true;
+					app_state.interaction_flags |= INACT_DRAGGING;
+					app_state.drag_start_x = world_mouse_x;
+					app_state.drag_start_y = world_mouse_y;
 					// app_state.selection.min_tile_x = 
+				}
+			}
+			else if (e.type == SDL_MOUSEBUTTONUP) { 
+				if (e.button.button == SDL_BUTTON_MIDDLE) {
+					// if (app_state.)
+					app_state.interaction_flags &= ~INACT_DRAGGING;
+					view->offset_x -= world_mouse_x - app_state.drag_start_x;
+					view->offset_y -= world_mouse_y - app_state.drag_start_y;
+					
 				}
 			}
 
 		}
-
-		SDL_GetWindowSize(window, &app_state.window_width, &app_state.window_height);
-		app_state.mouse_flags = SDL_GetMouseState(&app_state.mouse_x, &app_state.mouse_y);
 
 		const float view_speed = 16.0f / view->zoom;
 
@@ -532,6 +561,8 @@ int main(int argc, char **argv) {
 		if (app_state.view_right) view->offset_x += view_speed;
 		if (app_state.view_up) view->offset_y -= view_speed;
 		if (app_state.view_down) view->offset_y += view_speed;
+
+
 
 		SDL_SetRenderDrawColor(renderer, 128, 128, 128, 255);
 		SDL_RenderClear(renderer);
