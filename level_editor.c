@@ -98,14 +98,10 @@ typedef struct Application_State {
 
 	s32 window_width;
 	s32 window_height;
+
 	s32 mouse_x;
 	s32 mouse_y;
 	u32 mouse_flags;
-
-	b32 view_left;
-	b32 view_right;
-	b32 view_up;
-	b32 view_down;
 } Application_State;
 
 
@@ -164,6 +160,7 @@ static inline s64 next_higher_pow2(s64 v) {
 	return v;
 }
 
+#define ceil_to_multiplum(value, multiplum) ((((value) + (multiplum - 1)) / multiplum) * multiplum)
 
 static Tile_Map prepare_tile_map(Length_Buffer raw_data_buffer) {
 
@@ -174,9 +171,9 @@ static Tile_Map prepare_tile_map(Length_Buffer raw_data_buffer) {
 
 	result.tile_count = rounded_size / GAMEBOY_BYTES_PER_TILE;
 
-	s32 num_pixels = result.tile_count * GAMEBOY_TILE_WIDTH*GAMEBOY_TILE_WIDTH;
+	u32 num_pixels = result.tile_count * GAMEBOY_TILE_WIDTH*GAMEBOY_TILE_WIDTH;
 
-	result.pixels_per_row = next_higher_pow2(ceil(sqrt(num_pixels)));
+	result.pixels_per_row = ceil_to_multiplum((u32)ceil(sqrt(num_pixels)), GAMEBOY_TILE_WIDTH);
 	assert((result.pixels_per_row % GAMEBOY_TILE_WIDTH) == 0);
 
 	return result;
@@ -453,9 +450,16 @@ int main(int argc, char **argv) {
 	
 	load_tile_palette(&app_state, renderer, argv[1]);
 
+	b32 view_left;
+	b32 view_right;
+	b32 view_up;
+	b32 view_down;
+
 	SDL_Event e;
 	b32 quit = false;
 	while (!quit){
+
+		enum {DRAG_NO_CHANGE, DRAG_START, DRAG_STOP} drag_update = DRAG_NO_CHANGE;
 
 		SDL_GetWindowSize(window, &app_state.window_width, &app_state.window_height);
 		app_state.mouse_flags = SDL_GetMouseState(&app_state.mouse_x, &app_state.mouse_y);
@@ -496,18 +500,27 @@ int main(int argc, char **argv) {
 					}
 					break;
 
-					case SDLK_LEFT: app_state.view_left = true; break;
-					case SDLK_RIGHT: app_state.view_right = true; break;
-					case SDLK_UP: app_state.view_up = true; break;
-					case SDLK_DOWN: app_state.view_down = true; break;
+					case SDLK_LEFT: view_left = true; break;
+					case SDLK_RIGHT: view_right = true; break;
+					case SDLK_UP: view_up = true; break;
+					case SDLK_DOWN: view_down = true; break;
+
+					case SDLK_SPACE: {
+						if (!(app_state.interaction_flags & INACT_DRAGGING)) drag_update = DRAG_START;
+					}
+					break;
 				}
 			}
 			else if (e.type == SDL_KEYUP){
 				switch(e.key.keysym.sym) {
-					case SDLK_LEFT: app_state.view_left = false; break;
-					case SDLK_RIGHT: app_state.view_right = false; break;
-					case SDLK_UP: app_state.view_up = false; break;
-					case SDLK_DOWN: app_state.view_down = false; break;
+					case SDLK_LEFT: view_left = false; break;
+					case SDLK_RIGHT: view_right = false; break;
+					case SDLK_UP: view_up = false; break;
+					case SDLK_DOWN: view_down = false; break;
+
+					case SDLK_SPACE: {
+						if (app_state.interaction_flags & INACT_DRAGGING) drag_update = DRAG_STOP;
+					}
 				}
 			}
 			else if(e.type == SDL_MOUSEWHEEL && !(app_state.interaction_flags & INACT_SELECTING)) {
@@ -536,32 +549,36 @@ int main(int argc, char **argv) {
 			}
 			else if (e.type == SDL_MOUSEBUTTONDOWN) { 
 				if (e.button.button == SDL_BUTTON_MIDDLE) {
-					// if (app_state.)
-					app_state.interaction_flags |= INACT_DRAGGING;
-					app_state.drag_start_x = world_mouse_x;
-					app_state.drag_start_y = world_mouse_y;
-					// app_state.selection.min_tile_x = 
+					drag_update = DRAG_START;
 				}
 			}
 			else if (e.type == SDL_MOUSEBUTTONUP) { 
 				if (e.button.button == SDL_BUTTON_MIDDLE) {
-					// if (app_state.)
-					app_state.interaction_flags &= ~INACT_DRAGGING;
-					view->offset_x -= world_mouse_x - app_state.drag_start_x;
-					view->offset_y -= world_mouse_y - app_state.drag_start_y;
-					
+					drag_update = DRAG_STOP;
 				}
 			}
 
 		}
 
+
+		if (drag_update == DRAG_START) {
+			app_state.interaction_flags |= INACT_DRAGGING;
+			app_state.drag_start_x = world_mouse_x;
+			app_state.drag_start_y = world_mouse_y;
+
+		}
+		else if (drag_update == DRAG_STOP) {
+			app_state.interaction_flags &= ~INACT_DRAGGING;
+			view->offset_x -= world_mouse_x - app_state.drag_start_x;
+			view->offset_y -= world_mouse_y - app_state.drag_start_y;
+		}
+
 		const float view_speed = 16.0f / view->zoom;
 
-		if (app_state.view_left) view->offset_x -= view_speed;
-		if (app_state.view_right) view->offset_x += view_speed;
-		if (app_state.view_up) view->offset_y -= view_speed;
-		if (app_state.view_down) view->offset_y += view_speed;
-
+		if (view_left)   view->offset_x -= view_speed;
+		if (view_right)  view->offset_x += view_speed;
+		if (view_up)     view->offset_y -= view_speed;
+		if (view_down)   view->offset_y += view_speed;
 
 
 		SDL_SetRenderDrawColor(renderer, 128, 128, 128, 255);
