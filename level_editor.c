@@ -74,6 +74,7 @@ typedef enum Interaction_Flags {
 	INACT_SELECTING = 0x1,
 	INACT_DRAGGING = 0x2,
 	INACT_EYEDROPPER = 0x4,
+	INACT_DRAW_SOLID = 0x8,
 } Interaction_Flags;
 
 typedef struct Application_State {
@@ -94,7 +95,7 @@ typedef struct Application_State {
 	#define level_width 32
 	#define level_height 32
 	u32 level_map[level_height][level_width];
-	b32 collision_map[level_height][level_width];
+	u8 collision_map[level_height][level_width];
 
 	s32 window_width;
 	s32 window_height;
@@ -234,142 +235,6 @@ static inline View *get_current_view(Application_State *app_state) {
 	return NULL;
 }
 
-void draw_level(SDL_Renderer *renderer, Application_State *app_state) {
-
-	View view = *get_current_view(app_state);
-
-	SDL_RenderSetScale(renderer, view.zoom, view.zoom);
-
-	b32 mouse_left_clicked = app_state->mouse_flags & SDL_BUTTON(SDL_BUTTON_LEFT);
-
-	s32 pixel_scale_factor = app_state->window_height/256;
-	if (pixel_scale_factor <= 0) pixel_scale_factor = 1;
-	s32 scaled_tile_width = pixel_scale_factor * GAMEBOY_TILE_WIDTH;	
-
-	Tile_Map tile_map = app_state->tile_map;
-
-	const u32 tiles_per_row = tile_map.pixels_per_row / GAMEBOY_TILE_WIDTH; 
-
-	const u32 level_width_pixels = level_width * scaled_tile_width;
-
-	s32 x_offset = (app_state->window_width/2 - level_width_pixels/2) - view.offset_x;
-	s32 y_offset = (app_state->window_height/2 - level_width_pixels/2) - view.offset_y;
-
-	float zoomed_mouse_x = ((float)app_state->mouse_x / (float)view.zoom);
-	float zoomed_mouse_y = ((float)app_state->mouse_y / (float)view.zoom);
-
-	if (app_state->interaction_flags & INACT_DRAGGING) {
-		x_offset += zoomed_mouse_x + view.offset_x - app_state->drag_start_x;
-		y_offset += zoomed_mouse_y + view.offset_y - app_state->drag_start_y;
-	}
-
-	u32 hot_tile_x = (zoomed_mouse_x - x_offset) / scaled_tile_width;
-	u32 hot_tile_y = (zoomed_mouse_y - y_offset) / scaled_tile_width;
-
-	u32 draw_tile_index = app_state->draw_tile_index;
-
-	SDL_Rect dest_rect;
-	SDL_Rect source_rect;
-
-	switch (app_state->mode) {
-		case APP_MODE_VIEW:
-		case APP_MODE_EDIT_LEVEL: {
-			for (u32 y = 0; y < level_height; ++y) {
-				for (u32 x = 0; x < level_width; ++x) {
-
-					u32 tile_index = app_state->level_map[y][x];
-
-					source_rect = (SDL_Rect){
-						tile_index % tiles_per_row * GAMEBOY_TILE_WIDTH,
-						tile_index / tiles_per_row * GAMEBOY_TILE_WIDTH,
-						GAMEBOY_TILE_WIDTH,
-						GAMEBOY_TILE_WIDTH,
-					};
-
-					dest_rect = (SDL_Rect){
-						x * scaled_tile_width + x_offset,
-						y * scaled_tile_width + y_offset,
-						scaled_tile_width,
-						scaled_tile_width,
-					};
-					
-					SDL_RenderCopy(renderer, app_state->tile_map_texture, &source_rect, &dest_rect);
-
-					if (app_state->mode == APP_MODE_EDIT_LEVEL && x == hot_tile_x && y == hot_tile_y) {
-						if (mouse_left_clicked) {
-							app_state->level_map[y][x] = draw_tile_index;
-						}
-
-						SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);
-						
-						SDL_Rect hot_rect = {
-							draw_tile_index % tiles_per_row * GAMEBOY_TILE_WIDTH,
-							draw_tile_index / tiles_per_row * GAMEBOY_TILE_WIDTH,
-							GAMEBOY_TILE_WIDTH,
-							GAMEBOY_TILE_WIDTH,
-						};
-						SDL_RenderCopy(renderer, app_state->tile_map_texture, &hot_rect, &dest_rect);
-
-						SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
-						SDL_RenderDrawRect(renderer, &dest_rect);
-						SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-					}
-				}
-			}
-
-			if (app_state->interaction_flags & INACT_SELECTING) {
-				SDL_Rect selection = app_state->selection;
-
-				selection.x *= scaled_tile_width;
-				selection.y *= scaled_tile_width;
-				selection.w *= scaled_tile_width;
-				selection.h *= scaled_tile_width;
-
-				selection.x += x_offset;
-				selection.y += y_offset;
-
-				SDL_SetRenderDrawColor(renderer, 0, 150, 200, 192);
-				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
-				SDL_RenderFillRect(renderer, &selection);
-				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-			}
-		}
-		break;
-
-		case APP_MODE_PICK_TILE: {
-			SDL_Rect dest_rect = {
-				x_offset,
-				y_offset,
-				pixel_scale_factor * tile_map.pixels_per_row,
-				pixel_scale_factor * tile_map.pixels_per_row,
-			};
-			SDL_RenderCopy(renderer, app_state->tile_map_texture, NULL, &dest_rect);
-
-			SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);			
-			SDL_Rect hot_rect = {
-				hot_tile_x * scaled_tile_width + x_offset,
-				hot_tile_y * scaled_tile_width + y_offset,
-				scaled_tile_width,
-				scaled_tile_width,
-			};
-			SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
-			SDL_RenderDrawRect(renderer, &hot_rect);
-			SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-
-			if (mouse_left_clicked) {
-				if (hot_tile_y > tiles_per_row) hot_tile_y = tiles_per_row - 1;
-				if (hot_tile_x > tiles_per_row) hot_tile_x = tiles_per_row - 1;
-				app_state->draw_tile_index = (hot_tile_y * tiles_per_row) + hot_tile_x;
-			}
-		}
-		break;
-
-		default:
-			assert(0);
-	}
-
-	SDL_RenderSetScale(renderer, 1, 1);
-}
 
 static b32 load_tile_palette(Application_State *app_state, SDL_Renderer *renderer, char *palette_file_path) {
 	Length_Buffer tile_file_buffer = read_entire_file(palette_file_path);
@@ -437,7 +302,7 @@ int main(int argc, char **argv) {
 
 	Application_State app_state = {0};
 	app_state.mode = APP_MODE_EDIT_LEVEL;
-	app_state.draw_tile_index = 4;
+	app_state.draw_tile_index = 0;
 	app_state.view_edit.zoom = 1;
 	app_state.view_pick.zoom = 1;
 	app_state.selection = (SDL_Rect){10, 10, 5, 10};
@@ -445,15 +310,16 @@ int main(int argc, char **argv) {
 	for (s32 y = 0; y < level_height; ++y) {
 		for (s32 x = 0; x < level_width; ++x) {
 			app_state.level_map[y][x] = 0;
+			app_state.collision_map[y][x] = 0;
 		}
 	}
 	
 	load_tile_palette(&app_state, renderer, argv[1]);
 
-	b32 view_left;
-	b32 view_right;
-	b32 view_up;
-	b32 view_down;
+	b32 move_view_left;
+	b32 move_view_right;
+	b32 move_view_up;
+	b32 move_view_down;
 
 	SDL_Event e;
 	b32 quit = false;
@@ -467,6 +333,8 @@ int main(int argc, char **argv) {
 		View *view = get_current_view(&app_state);
 		float world_mouse_x = (float)app_state.mouse_x / (float)view->zoom + view->offset_x;
 		float world_mouse_y = (float)app_state.mouse_y / (float)view->zoom + view->offset_y;
+
+		b32 do_fill = false;
 
 		while (SDL_PollEvent(&e)) {
 
@@ -494,16 +362,39 @@ int main(int argc, char **argv) {
 					}
 					break;
 
+					case SDLK_s: {
+						if (e.key.keysym.mod & KMOD_CTRL) {
+							// TODO(jakob): save
+						}
+						else if (app_state.mode == APP_MODE_EDIT_LEVEL) {
+							// Toggle draw solid
+							app_state.interaction_flags ^= INACT_DRAW_SOLID;
+						}
+					}
+					break;
+
+					case SDLK_f: {
+						view->offset_x = 0;
+						view->offset_y = 0;
+						view->zoom = 1;
+					}
+					break;
+
+					case SDLK_b: {
+						do_fill = true;
+					}
+					break;
+
 					case SDLK_TAB: {
 						if (app_state.mode == APP_MODE_EDIT_LEVEL) app_state.mode = APP_MODE_PICK_TILE;
 						else app_state.mode = APP_MODE_EDIT_LEVEL;
 					}
 					break;
 
-					case SDLK_LEFT: view_left = true; break;
-					case SDLK_RIGHT: view_right = true; break;
-					case SDLK_UP: view_up = true; break;
-					case SDLK_DOWN: view_down = true; break;
+					case SDLK_LEFT: move_view_left = true; break;
+					case SDLK_RIGHT: move_view_right = true; break;
+					case SDLK_UP: move_view_up = true; break;
+					case SDLK_DOWN: move_view_down = true; break;
 
 					case SDLK_SPACE: {
 						if (!(app_state.interaction_flags & INACT_DRAGGING)) drag_update = DRAG_START;
@@ -513,17 +404,17 @@ int main(int argc, char **argv) {
 			}
 			else if (e.type == SDL_KEYUP){
 				switch(e.key.keysym.sym) {
-					case SDLK_LEFT: view_left = false; break;
-					case SDLK_RIGHT: view_right = false; break;
-					case SDLK_UP: view_up = false; break;
-					case SDLK_DOWN: view_down = false; break;
+					case SDLK_LEFT: move_view_left = false; break;
+					case SDLK_RIGHT: move_view_right = false; break;
+					case SDLK_UP: move_view_up = false; break;
+					case SDLK_DOWN: move_view_down = false; break;
 
 					case SDLK_SPACE: {
 						if (app_state.interaction_flags & INACT_DRAGGING) drag_update = DRAG_STOP;
 					}
 				}
 			}
-			else if(e.type == SDL_MOUSEWHEEL && !(app_state.interaction_flags & INACT_SELECTING)) {
+			else if(e.type == SDL_MOUSEWHEEL) {
 				
 				if(e.wheel.y > 0) {
 					view->zoom *= 1.2;
@@ -557,7 +448,6 @@ int main(int argc, char **argv) {
 					drag_update = DRAG_STOP;
 				}
 			}
-
 		}
 
 
@@ -575,16 +465,259 @@ int main(int argc, char **argv) {
 
 		const float view_speed = 16.0f / view->zoom;
 
-		if (view_left)   view->offset_x -= view_speed;
-		if (view_right)  view->offset_x += view_speed;
-		if (view_up)     view->offset_y -= view_speed;
-		if (view_down)   view->offset_y += view_speed;
+		if (move_view_left)   view->offset_x -= view_speed;
+		if (move_view_right)  view->offset_x += view_speed;
+		if (move_view_up)     view->offset_y -= view_speed;
+		if (move_view_down)   view->offset_y += view_speed;
 
-
-		SDL_SetRenderDrawColor(renderer, 128, 128, 128, 255);
+		SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
 		SDL_RenderClear(renderer);
 
-		draw_level(renderer, &app_state);
+		SDL_RenderSetScale(renderer, view->zoom, view->zoom);
+
+		b32 mouse_left_clicked = app_state.mouse_flags & SDL_BUTTON(SDL_BUTTON_LEFT);
+		b32 mouse_right_clicked = app_state.mouse_flags & SDL_BUTTON(SDL_BUTTON_RIGHT);
+
+		s32 pixel_scale_factor = app_state.window_height/256;
+		if (pixel_scale_factor <= 0) pixel_scale_factor = 1;
+		s32 scaled_tile_width = pixel_scale_factor * GAMEBOY_TILE_WIDTH;	
+
+		Tile_Map tile_map = app_state.tile_map;
+
+		const u32 tiles_per_row = tile_map.pixels_per_row / GAMEBOY_TILE_WIDTH; 
+
+		const u32 level_width_pixels = level_width * scaled_tile_width;
+
+		s32 x_offset = (app_state.window_width/2 - level_width_pixels/2) - view->offset_x;
+		s32 y_offset = (app_state.window_height/2 - level_width_pixels/2) - view->offset_y;
+
+		float zoomed_mouse_x = ((float)app_state.mouse_x / (float)view->zoom);
+		float zoomed_mouse_y = ((float)app_state.mouse_y / (float)view->zoom);
+
+		if (app_state.interaction_flags & INACT_DRAGGING) {
+			x_offset += zoomed_mouse_x + view->offset_x - app_state.drag_start_x;
+			y_offset += zoomed_mouse_y + view->offset_y - app_state.drag_start_y;
+		}
+
+		u32 hot_tile_x = (zoomed_mouse_x - x_offset) / scaled_tile_width;
+		u32 hot_tile_y = (zoomed_mouse_y - y_offset) / scaled_tile_width;
+
+		if (
+			hot_tile_x < level_width &&
+			hot_tile_y < level_height
+		) {
+			if (mouse_left_clicked) {
+				app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
+				app_state.collision_map[hot_tile_y][hot_tile_x] = (app_state.interaction_flags & INACT_DRAW_SOLID) ? 1 : 0;
+			}
+			else if (mouse_right_clicked) {
+				app_state.draw_tile_index = app_state.level_map[hot_tile_y][hot_tile_x];
+				if (app_state.collision_map[hot_tile_y][hot_tile_x] == 1) {
+					app_state.interaction_flags |= INACT_DRAW_SOLID;
+				}
+				else {
+					app_state.interaction_flags &= ~INACT_DRAW_SOLID;
+				}
+			}
+
+			if (do_fill) {
+
+				u32 tile_index_to_fill_over = app_state.level_map[hot_tile_y][hot_tile_x];
+
+				u32 stack_position = 0;
+				u32 stack[2*level_width*level_height];
+
+				app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
+
+				u32 selected_tile_x = hot_tile_x;
+				u32 selected_tile_y = hot_tile_y;
+
+				// consider neighbors, color and add them to the stack if applicable
+				for (;;) {
+					// Order of neighbors, 0 denotes the current tile
+					//
+					//      [1]
+					//   [3][0][4]
+					//      [2]
+
+					u32 neighbor_ys[4] = {selected_tile_y - 1, selected_tile_y + 1, selected_tile_y, selected_tile_y};
+					u32 neighbor_xs[4] = {selected_tile_x, selected_tile_x, selected_tile_x - 1, selected_tile_x + 1};
+
+					for (u32 i = 0; i < 4; ++i) {
+
+						u32 neighbor_x = neighbor_xs[i];
+						u32 neighbor_y = neighbor_ys[i];
+
+						if (
+							neighbor_y < level_height &&
+							neighbor_x < level_width
+						) {
+
+							u32 neighbor_tile_index = app_state.level_map[neighbor_y][neighbor_x];
+
+							if (neighbor_tile_index == tile_index_to_fill_over) {
+								app_state.level_map[neighbor_y][neighbor_x] = app_state.draw_tile_index;
+
+								stack[stack_position++] = neighbor_x;
+								stack[stack_position++] = neighbor_y;
+							}
+						}
+
+					}
+
+					if (stack_position >= 2) {
+						selected_tile_y = stack[--stack_position];
+						selected_tile_x = stack[--stack_position];
+					}
+					else {
+						break;
+					}
+				}
+			}
+		}
+
+		SDL_Rect dest_rect;
+		SDL_Rect source_rect;
+
+
+		{ // Drop shadow
+			s32 border_radius = 6;
+			dest_rect = (SDL_Rect){
+				x_offset - border_radius,
+				y_offset - border_radius,
+				scaled_tile_width*level_width + (2*border_radius),
+				scaled_tile_width*level_height + (2*border_radius)
+			};
+
+			SDL_SetRenderDrawColor(renderer, 0, 0, 0, 60);
+			SDL_RenderFillRect(renderer, &dest_rect);
+		}
+
+		switch (app_state.mode) {
+			case APP_MODE_VIEW:
+			case APP_MODE_EDIT_LEVEL: {
+				for (u32 y = 0; y < level_height; ++y) {
+					for (u32 x = 0; x < level_width; ++x) {
+
+						u32 tile_index = app_state.level_map[y][x];
+
+						dest_rect = (SDL_Rect){
+							x * scaled_tile_width + x_offset,
+							y * scaled_tile_width + y_offset,
+							scaled_tile_width,
+							scaled_tile_width,
+						};
+
+						b32 draw_solid = false;
+						b32 is_hot_tile = (app_state.mode == APP_MODE_EDIT_LEVEL && x == hot_tile_x && y == hot_tile_y);
+						
+						if (!is_hot_tile) {
+							
+							source_rect = (SDL_Rect){
+								tile_index % tiles_per_row * GAMEBOY_TILE_WIDTH,
+								tile_index / tiles_per_row * GAMEBOY_TILE_WIDTH,
+								GAMEBOY_TILE_WIDTH,
+								GAMEBOY_TILE_WIDTH,
+							};
+							
+							draw_solid = app_state.collision_map[y][x] == 1;
+						}
+						else {
+
+							SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);
+							
+							source_rect = (SDL_Rect){
+								app_state.draw_tile_index % tiles_per_row * GAMEBOY_TILE_WIDTH,
+								app_state.draw_tile_index / tiles_per_row * GAMEBOY_TILE_WIDTH,
+								GAMEBOY_TILE_WIDTH,
+								GAMEBOY_TILE_WIDTH,
+							};
+							//SDL_RenderCopy(renderer, app_state.tile_map_texture, &hot_rect, &dest_rect);
+
+							draw_solid = app_state.interaction_flags & INACT_DRAW_SOLID;
+						}
+
+						if (draw_solid) {
+							SDL_SetTextureColorMod( app_state.tile_map_texture, 255, 128, 0 );
+						}
+						else {
+							SDL_SetTextureColorMod( app_state.tile_map_texture, 255, 255, 255 );
+						}
+						
+						SDL_RenderCopy(renderer, app_state.tile_map_texture, &source_rect, &dest_rect);
+
+						if (is_hot_tile) {
+							SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
+							SDL_RenderDrawRect(renderer, &dest_rect);
+							SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+						}
+
+					}
+				}
+
+				if (app_state.interaction_flags & INACT_SELECTING) {
+					SDL_Rect selection = app_state.selection;
+
+					selection.x *= scaled_tile_width;
+					selection.y *= scaled_tile_width;
+					selection.w *= scaled_tile_width;
+					selection.h *= scaled_tile_width;
+
+					selection.x += x_offset;
+					selection.y += y_offset;
+
+					SDL_SetRenderDrawColor(renderer, 0, 150, 200, 192);
+					SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
+					SDL_RenderFillRect(renderer, &selection);
+					SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+				}
+			}
+			break;
+
+			case APP_MODE_PICK_TILE: {
+				SDL_Rect dest_rect = {
+					x_offset,
+					y_offset,
+					pixel_scale_factor * tile_map.pixels_per_row,
+					pixel_scale_factor * tile_map.pixels_per_row,
+				};
+				SDL_RenderCopy(renderer, app_state.tile_map_texture, NULL, &dest_rect);
+
+				SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);			
+				SDL_Rect hot_rect = {
+					hot_tile_x * scaled_tile_width + x_offset,
+					hot_tile_y * scaled_tile_width + y_offset,
+					scaled_tile_width,
+					scaled_tile_width,
+				};
+				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
+				SDL_RenderDrawRect(renderer, &hot_rect);
+				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+				if (mouse_left_clicked) {
+					if (hot_tile_y > tiles_per_row) hot_tile_y = tiles_per_row - 1;
+					if (hot_tile_x > tiles_per_row) hot_tile_x = tiles_per_row - 1;
+					app_state.draw_tile_index = (hot_tile_y * tiles_per_row) + hot_tile_x;
+				}
+			}
+			break;
+
+			default:
+				assert(0);
+		}
+
+		SDL_RenderSetScale(renderer, 1, 1);
+
+
+
+
+
+
+
+
+
+
+
 
 		SDL_RenderPresent(renderer);
 	}
