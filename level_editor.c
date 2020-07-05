@@ -77,6 +77,9 @@ typedef enum Interaction_Flags {
 	INACT_DRAW_SOLID = 0x8,
 } Interaction_Flags;
 
+#define level_width 32
+#define level_height 32
+
 typedef struct Application_State {
 	Application_Mode mode;
 	View view_edit;
@@ -89,11 +92,23 @@ typedef struct Application_State {
 	s32 drag_start_x;
 	s32 drag_start_y;
 
+	struct {
+		b32 doing_fill;
+
+		u32 tile_index_to_fill_over;
+
+		u32 stack_position;
+		u32 queue_front;
+		u32 stack[2*level_width*level_height];
+
+		u32 selected_tile_x;
+		u32 selected_tile_y;
+
+	} bucket_fill_state;
+
 	u32 draw_tile_index;
 	Tile_Map tile_map;
 	SDL_Texture *tile_map_texture;
-	#define level_width 32
-	#define level_height 32
 	u32 level_map[level_height][level_width];
 	u8 collision_map[level_height][level_width];
 
@@ -519,21 +534,31 @@ int main(int argc, char **argv) {
 					app_state.interaction_flags &= ~INACT_DRAW_SOLID;
 				}
 			}
+			else if (app_state.bucket_fill_state.doing_fill || do_fill) {
 
-			if (do_fill) {
+				if (!app_state.bucket_fill_state.doing_fill) {
+					app_state.bucket_fill_state.doing_fill = true;
+					app_state.bucket_fill_state.tile_index_to_fill_over = app_state.level_map[hot_tile_y][hot_tile_x];
+					app_state.bucket_fill_state.queue_front = 0;
+					app_state.bucket_fill_state.stack_position = 0;
+					app_state.bucket_fill_state.selected_tile_x = hot_tile_x;
+					app_state.bucket_fill_state.selected_tile_y = hot_tile_y;
+					
+					app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
+				}
 
-				u32 tile_index_to_fill_over = app_state.level_map[hot_tile_y][hot_tile_x];
+				u32 tile_index_to_fill_over = app_state.bucket_fill_state.tile_index_to_fill_over;
 
-				u32 stack_position = 0;
-				u32 stack[2*level_width*level_height];
+				u32 stack_position = app_state.bucket_fill_state.stack_position;
+				u32 queue_front = app_state.bucket_fill_state.queue_front;
 
-				app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
+				u32 *stack = app_state.bucket_fill_state.stack;
 
-				u32 selected_tile_x = hot_tile_x;
-				u32 selected_tile_y = hot_tile_y;
+				u32 selected_tile_x = app_state.bucket_fill_state.selected_tile_x;
+				u32 selected_tile_y = app_state.bucket_fill_state.selected_tile_y;
 
 				// consider neighbors, color and add them to the stack if applicable
-				for (;;) {
+				{
 					// Order of neighbors, 0 denotes the current tile
 					//
 					//      [1]
@@ -559,20 +584,59 @@ int main(int argc, char **argv) {
 								app_state.level_map[neighbor_y][neighbor_x] = app_state.draw_tile_index;
 
 								stack[stack_position++] = neighbor_x;
+								if (stack_position > 2*level_width*level_height) {
+									stack_position = 0;
+								}
 								stack[stack_position++] = neighbor_y;
+								if (stack_position > 2*level_width*level_height) {
+									stack_position = 0;
+								}
 							}
 						}
 
 					}
+#if 0
 
-					if (stack_position >= 2) {
-						selected_tile_y = stack[--stack_position];
-						selected_tile_x = stack[--stack_position];
+					s32 queue_length = stack_position - queue_front;
+
+					if (queue_length < 0) {
+						queue_length = 2*level_width*level_height - queue_front + stack_position;
 					}
+					
+					printf("Queue Length: %d\n", queue_length);
+
+					if (queue_length >= 2) {
+						// app_state.bucket_fill_state.selected_tile_y = stack[--stack_position];
+						// app_state.bucket_fill_state.selected_tile_x = stack[--stack_position];
+						app_state.bucket_fill_state.selected_tile_x = stack[queue_front++];
+						if (queue_front > 2*level_width*level_height) {
+							queue_front = 0;
+						}
+						app_state.bucket_fill_state.selected_tile_y = stack[queue_front++];
+						if (queue_front > 2*level_width*level_height) {
+							queue_front = 0;
+						}
+
+						app_state.bucket_fill_state.stack_position = stack_position;
+						app_state.bucket_fill_state.queue_front = queue_front;
+
+					}
+#else
+					if (stack_position >= 2) {
+						app_state.bucket_fill_state.selected_tile_y = stack[--stack_position];
+						app_state.bucket_fill_state.selected_tile_x = stack[--stack_position];
+
+						app_state.bucket_fill_state.stack_position = stack_position;
+						// app_state.bucket_fill_state.queue_front = queue_front;
+
+						printf("Stack Height: %d\n", stack_position);
+					}				
+#endif
 					else {
-						break;
+						app_state.bucket_fill_state.doing_fill = false;					
 					}
 				}
+
 			}
 		}
 
@@ -580,22 +644,23 @@ int main(int argc, char **argv) {
 		SDL_Rect source_rect;
 
 
-		{ // Drop shadow
-			s32 border_radius = 6;
-			dest_rect = (SDL_Rect){
-				x_offset - border_radius,
-				y_offset - border_radius,
-				scaled_tile_width*level_width + (2*border_radius),
-				scaled_tile_width*level_height + (2*border_radius)
-			};
-
-			SDL_SetRenderDrawColor(renderer, 0, 0, 0, 60);
-			SDL_RenderFillRect(renderer, &dest_rect);
-		}
 
 		switch (app_state.mode) {
 			case APP_MODE_VIEW:
 			case APP_MODE_EDIT_LEVEL: {
+				{ // Drop shadow
+					s32 border_radius = 6;
+					dest_rect = (SDL_Rect){
+						x_offset - border_radius,
+						y_offset - border_radius,
+						scaled_tile_width*level_width + (2*border_radius),
+						scaled_tile_width*level_height + (2*border_radius)
+					};
+
+					SDL_SetRenderDrawColor(renderer, 0, 0, 0, 60);
+					SDL_RenderFillRect(renderer, &dest_rect);
+				}
+				
 				for (u32 y = 0; y < level_height; ++y) {
 					for (u32 x = 0; x < level_width; ++x) {
 
@@ -707,18 +772,6 @@ int main(int argc, char **argv) {
 		}
 
 		SDL_RenderSetScale(renderer, 1, 1);
-
-
-
-
-
-
-
-
-
-
-
-
 		SDL_RenderPresent(renderer);
 	}
 
