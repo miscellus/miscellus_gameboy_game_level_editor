@@ -309,7 +309,7 @@ int main(int argc, char **argv) {
 
 	for (s32 y = 0; y < level_height; ++y) {
 		for (s32 x = 0; x < level_width; ++x) {
-			app_state.level_map[y][x] = 0;
+			app_state.level_map[y][x] = 0; //!(x&y&1);
 			app_state.collision_map[y][x] = 0;
 		}
 	}
@@ -524,54 +524,123 @@ int main(int argc, char **argv) {
 
 				u32 tile_index_to_fill_over = app_state.level_map[hot_tile_y][hot_tile_x];
 
-				u32 stack_position = 0;
-				u32 stack[2*level_width*level_height];
+				if (tile_index_to_fill_over != app_state.draw_tile_index) {
 
-				app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
+					u32 stack_position = 0;
+					u32 stack[level_width*level_height];
 
-				u32 selected_tile_x = hot_tile_x;
-				u32 selected_tile_y = hot_tile_y;
+					u32 selected_tile_x = hot_tile_x;
+					u32 selected_tile_y = hot_tile_y;
 
-				// consider neighbors, color and add them to the stack if applicable
-				for (;;) {
-					// Order of neighbors, 0 denotes the current tile
-					//
-					//      [1]
-					//   [3][0][4]
-					//      [2]
+					for (;;) {
 
-					u32 neighbor_ys[4] = {selected_tile_y - 1, selected_tile_y + 1, selected_tile_y, selected_tile_y};
-					u32 neighbor_xs[4] = {selected_tile_x, selected_tile_x, selected_tile_x - 1, selected_tile_x + 1};
-
-					for (u32 i = 0; i < 4; ++i) {
-
-						u32 neighbor_x = neighbor_xs[i];
-						u32 neighbor_y = neighbor_ys[i];
-
-						if (
-							neighbor_y < level_height &&
-							neighbor_x < level_width
-						) {
-
-							u32 neighbor_tile_index = app_state.level_map[neighbor_y][neighbor_x];
-
-							if (neighbor_tile_index == tile_index_to_fill_over) {
-								app_state.level_map[neighbor_y][neighbor_x] = app_state.draw_tile_index;
-
-								stack[stack_position++] = neighbor_x;
-								stack[stack_position++] = neighbor_y;
+						// Spool to beginning of line segment:
+						while (selected_tile_x != 0) {
+							if (tile_index_to_fill_over != app_state.level_map[selected_tile_y][selected_tile_x-1]) {
+								break;
 							}
+							--selected_tile_x;
 						}
 
-					}
+						b32 search_above = true;
+						b32 search_below = true;
 
-					if (stack_position >= 2) {
-						selected_tile_y = stack[--stack_position];
-						selected_tile_x = stack[--stack_position];
+						do {
+
+							// Fill
+							app_state.level_map[selected_tile_y][selected_tile_x] = app_state.draw_tile_index;
+
+							if (selected_tile_y > 0) {
+
+								b32 above_should_fill = (tile_index_to_fill_over == app_state.level_map[selected_tile_y-1][selected_tile_x]);
+
+								if (search_above && above_should_fill) {
+									stack[stack_position++] = selected_tile_x;
+									stack[stack_position++] = selected_tile_y-1;
+									printf("Stacksize: %d\n", stack_position);
+									search_above = false;
+								}
+								else if (!search_above && !above_should_fill) {
+									search_above = true;
+								}
+							}
+
+							if (selected_tile_y < level_height-1) {
+
+								b32 below_should_fill = (tile_index_to_fill_over == app_state.level_map[selected_tile_y+1][selected_tile_x]);
+								
+								if (search_below && below_should_fill) {
+									stack[stack_position++] = selected_tile_x;
+									stack[stack_position++] = selected_tile_y+1;
+									printf("Stacksize: %d\n", stack_position);
+									search_below = false;
+								}
+								else if (!search_below && !below_should_fill) {
+									search_below = true;
+								}
+							}
+
+							++selected_tile_x;
+
+							if (tile_index_to_fill_over != app_state.level_map[selected_tile_y][selected_tile_x]) {
+								break;
+							}
+						} while (selected_tile_x < level_width);
+						
+						if (stack_position >= 2) {
+							do {
+								selected_tile_y = stack[--stack_position];
+								selected_tile_x = stack[--stack_position];
+							} while (stack_position >= 2 && tile_index_to_fill_over != app_state.level_map[selected_tile_y][selected_tile_x]);
+						}
+						else {
+							break;
+						}
 					}
-					else {
-						break;
+#if 0
+
+					// consider neighbors, color and add them to the stack if applicable
+					for (;;) {
+						// Order of neighbors, 0 denotes the current tile
+						//
+						//      [1]
+						//   [3][0][4]
+						//      [2]
+
+						u32 neighbor_ys[4] = {selected_tile_y - 1, selected_tile_y + 1, selected_tile_y, selected_tile_y};
+						u32 neighbor_xs[4] = {selected_tile_x, selected_tile_x, selected_tile_x - 1, selected_tile_x + 1};
+
+						for (u32 i = 0; i < 4; ++i) {
+
+							u32 neighbor_x = neighbor_xs[i];
+							u32 neighbor_y = neighbor_ys[i];
+
+							if (
+								neighbor_y < level_height &&
+								neighbor_x < level_width
+							) {
+
+								u32 neighbor_tile_index = app_state.level_map[neighbor_y][neighbor_x];
+
+								if (neighbor_tile_index == tile_index_to_fill_over) {
+									app_state.level_map[neighbor_y][neighbor_x] = app_state.draw_tile_index;
+
+									stack[stack_position++] = neighbor_x;
+									stack[stack_position++] = neighbor_y;
+								}
+							}
+
+						}
+
+						if (stack_position >= 2) {
+							selected_tile_y = stack[--stack_position];
+							selected_tile_x = stack[--stack_position];
+						}
+						else {
+							break;
+						}
 					}
+#endif
 				}
 			}
 		}
@@ -579,23 +648,23 @@ int main(int argc, char **argv) {
 		SDL_Rect dest_rect;
 		SDL_Rect source_rect;
 
-
-		{ // Drop shadow
-			s32 border_radius = 6;
-			dest_rect = (SDL_Rect){
-				x_offset - border_radius,
-				y_offset - border_radius,
-				scaled_tile_width*level_width + (2*border_radius),
-				scaled_tile_width*level_height + (2*border_radius)
-			};
-
-			SDL_SetRenderDrawColor(renderer, 0, 0, 0, 60);
-			SDL_RenderFillRect(renderer, &dest_rect);
-		}
-
 		switch (app_state.mode) {
 			case APP_MODE_VIEW:
 			case APP_MODE_EDIT_LEVEL: {
+
+				{ // Drop shadow
+					s32 border_radius = 6;
+					dest_rect = (SDL_Rect){
+						x_offset - border_radius,
+						y_offset - border_radius,
+						scaled_tile_width*level_width + (2*border_radius),
+						scaled_tile_width*level_height + (2*border_radius)
+					};
+
+					SDL_SetRenderDrawColor(renderer, 0, 0, 0, 60);
+					SDL_RenderFillRect(renderer, &dest_rect);
+				}
+
 				for (u32 y = 0; y < level_height; ++y) {
 					for (u32 x = 0; x < level_width; ++x) {
 
@@ -707,17 +776,6 @@ int main(int argc, char **argv) {
 		}
 
 		SDL_RenderSetScale(renderer, 1, 1);
-
-
-
-
-
-
-
-
-
-
-
 
 		SDL_RenderPresent(renderer);
 	}
