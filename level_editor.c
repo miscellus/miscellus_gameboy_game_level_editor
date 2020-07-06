@@ -95,7 +95,7 @@ typedef struct Application_State {
 	#define level_width 32
 	#define level_height 32
 	u32 level_map[level_height][level_width];
-	u8 collision_map[level_height][level_width];
+	u8 _collision_map[level_height][level_width];
 
 	s32 window_width;
 	s32 window_height;
@@ -273,6 +273,81 @@ static b32 load_tile_palette(Application_State *app_state, SDL_Renderer *rendere
 	return true;
 }
 
+void flood_fill(u32 x, u32 y, u32 tile, u32 grid[level_height][level_width]) {
+
+	u32 tile_to_fill_over = grid[y][x];
+
+	if (tile_to_fill_over != tile) {
+
+		u32 stack_position = 0;
+		u32 stack[level_width*level_height];
+
+		for (;;) {
+
+			// Spool to beginning of line segment:
+			while (x != 0) {
+				if (tile_to_fill_over != grid[y][x-1]) {
+					break;
+				}
+				--x;
+			}
+
+			b32 search_above = true;
+			b32 search_below = true;
+
+			do {
+
+				// Fill
+				grid[y][x] = tile;
+
+				if (y > 0) {
+
+					b32 above_should_fill = (tile_to_fill_over == grid[y-1][x]);
+
+					if (search_above && above_should_fill) {
+						stack[stack_position++] = x;
+						stack[stack_position++] = y-1;
+						search_above = false;
+					}
+					else if (!search_above && !above_should_fill) {
+						search_above = true;
+					}
+				}
+
+				if (y < level_height-1) {
+
+					b32 below_should_fill = (tile_to_fill_over == grid[y+1][x]);
+					
+					if (search_below && below_should_fill) {
+						stack[stack_position++] = x;
+						stack[stack_position++] = y+1;
+						search_below = false;
+					}
+					else if (!search_below && !below_should_fill) {
+						search_below = true;
+					}
+				}
+
+				++x;
+
+				if (tile_to_fill_over != grid[y][x]) {
+					break;
+				}
+			} while (x < level_width);
+			
+			if (stack_position >= 2) {
+				do {
+					y = stack[--stack_position];
+					x = stack[--stack_position];
+				} while (stack_position >= 2 && tile_to_fill_over != grid[y][x]);
+			}
+			else {
+				break;
+			}
+		}
+	}
+}
+
 int main(int argc, char **argv) {
 	if (argc < 2) {
 		panic("%s expects the path to a tile palette file as the first argument.\n", argv[0]);
@@ -310,7 +385,7 @@ int main(int argc, char **argv) {
 	for (s32 y = 0; y < level_height; ++y) {
 		for (s32 x = 0; x < level_width; ++x) {
 			app_state.level_map[y][x] = 0; //!(x&y&1);
-			app_state.collision_map[y][x] = 0;
+			// app_state.collision_map[y][x] = 0;
 		}
 	}
 	
@@ -368,7 +443,7 @@ int main(int argc, char **argv) {
 						}
 						else if (app_state.mode == APP_MODE_EDIT_LEVEL) {
 							// Toggle draw solid
-							app_state.interaction_flags ^= INACT_DRAW_SOLID;
+							app_state.draw_tile_index ^= (1 << 31);
 						}
 					}
 					break;
@@ -508,140 +583,13 @@ int main(int argc, char **argv) {
 		) {
 			if (mouse_left_clicked) {
 				app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
-				app_state.collision_map[hot_tile_y][hot_tile_x] = (app_state.interaction_flags & INACT_DRAW_SOLID) ? 1 : 0;
 			}
 			else if (mouse_right_clicked) {
 				app_state.draw_tile_index = app_state.level_map[hot_tile_y][hot_tile_x];
-				if (app_state.collision_map[hot_tile_y][hot_tile_x] == 1) {
-					app_state.interaction_flags |= INACT_DRAW_SOLID;
-				}
-				else {
-					app_state.interaction_flags &= ~INACT_DRAW_SOLID;
-				}
 			}
 
 			if (do_fill) {
-
-				u32 tile_index_to_fill_over = app_state.level_map[hot_tile_y][hot_tile_x];
-
-				if (tile_index_to_fill_over != app_state.draw_tile_index) {
-
-					u32 stack_position = 0;
-					u32 stack[level_width*level_height];
-
-					u32 selected_tile_x = hot_tile_x;
-					u32 selected_tile_y = hot_tile_y;
-
-					for (;;) {
-
-						// Spool to beginning of line segment:
-						while (selected_tile_x != 0) {
-							if (tile_index_to_fill_over != app_state.level_map[selected_tile_y][selected_tile_x-1]) {
-								break;
-							}
-							--selected_tile_x;
-						}
-
-						b32 search_above = true;
-						b32 search_below = true;
-
-						do {
-
-							// Fill
-							app_state.level_map[selected_tile_y][selected_tile_x] = app_state.draw_tile_index;
-
-							if (selected_tile_y > 0) {
-
-								b32 above_should_fill = (tile_index_to_fill_over == app_state.level_map[selected_tile_y-1][selected_tile_x]);
-
-								if (search_above && above_should_fill) {
-									stack[stack_position++] = selected_tile_x;
-									stack[stack_position++] = selected_tile_y-1;
-									printf("Stacksize: %d\n", stack_position);
-									search_above = false;
-								}
-								else if (!search_above && !above_should_fill) {
-									search_above = true;
-								}
-							}
-
-							if (selected_tile_y < level_height-1) {
-
-								b32 below_should_fill = (tile_index_to_fill_over == app_state.level_map[selected_tile_y+1][selected_tile_x]);
-								
-								if (search_below && below_should_fill) {
-									stack[stack_position++] = selected_tile_x;
-									stack[stack_position++] = selected_tile_y+1;
-									printf("Stacksize: %d\n", stack_position);
-									search_below = false;
-								}
-								else if (!search_below && !below_should_fill) {
-									search_below = true;
-								}
-							}
-
-							++selected_tile_x;
-
-							if (tile_index_to_fill_over != app_state.level_map[selected_tile_y][selected_tile_x]) {
-								break;
-							}
-						} while (selected_tile_x < level_width);
-						
-						if (stack_position >= 2) {
-							do {
-								selected_tile_y = stack[--stack_position];
-								selected_tile_x = stack[--stack_position];
-							} while (stack_position >= 2 && tile_index_to_fill_over != app_state.level_map[selected_tile_y][selected_tile_x]);
-						}
-						else {
-							break;
-						}
-					}
-#if 0
-
-					// consider neighbors, color and add them to the stack if applicable
-					for (;;) {
-						// Order of neighbors, 0 denotes the current tile
-						//
-						//      [1]
-						//   [3][0][4]
-						//      [2]
-
-						u32 neighbor_ys[4] = {selected_tile_y - 1, selected_tile_y + 1, selected_tile_y, selected_tile_y};
-						u32 neighbor_xs[4] = {selected_tile_x, selected_tile_x, selected_tile_x - 1, selected_tile_x + 1};
-
-						for (u32 i = 0; i < 4; ++i) {
-
-							u32 neighbor_x = neighbor_xs[i];
-							u32 neighbor_y = neighbor_ys[i];
-
-							if (
-								neighbor_y < level_height &&
-								neighbor_x < level_width
-							) {
-
-								u32 neighbor_tile_index = app_state.level_map[neighbor_y][neighbor_x];
-
-								if (neighbor_tile_index == tile_index_to_fill_over) {
-									app_state.level_map[neighbor_y][neighbor_x] = app_state.draw_tile_index;
-
-									stack[stack_position++] = neighbor_x;
-									stack[stack_position++] = neighbor_y;
-								}
-							}
-
-						}
-
-						if (stack_position >= 2) {
-							selected_tile_y = stack[--stack_position];
-							selected_tile_x = stack[--stack_position];
-						}
-						else {
-							break;
-						}
-					}
-#endif
-				}
+				flood_fill(hot_tile_x, hot_tile_y, app_state.draw_tile_index, app_state.level_map);
 			}
 		}
 
@@ -668,7 +616,19 @@ int main(int argc, char **argv) {
 				for (u32 y = 0; y < level_height; ++y) {
 					for (u32 x = 0; x < level_width; ++x) {
 
-						u32 tile_index = app_state.level_map[y][x];
+						b32 is_hot_tile = (app_state.mode == APP_MODE_EDIT_LEVEL && x == hot_tile_x && y == hot_tile_y);
+
+						u32 tile_index;
+						
+						if (!is_hot_tile) {
+							tile_index = app_state.level_map[y][x];
+						}
+						else {
+							tile_index = app_state.draw_tile_index;
+						}
+						
+						u32 solid_flag = tile_index & (1 << 31);
+						tile_index &= ~(1 << 31);
 
 						dest_rect = (SDL_Rect){
 							x * scaled_tile_width + x_offset,
@@ -676,38 +636,15 @@ int main(int argc, char **argv) {
 							scaled_tile_width,
 							scaled_tile_width,
 						};
-
-						b32 draw_solid = false;
-						b32 is_hot_tile = (app_state.mode == APP_MODE_EDIT_LEVEL && x == hot_tile_x && y == hot_tile_y);
+						source_rect = (SDL_Rect){
+							tile_index % tiles_per_row * GAMEBOY_TILE_WIDTH,
+							tile_index / tiles_per_row * GAMEBOY_TILE_WIDTH,
+							GAMEBOY_TILE_WIDTH,
+							GAMEBOY_TILE_WIDTH,
+						};
 						
-						if (!is_hot_tile) {
-							
-							source_rect = (SDL_Rect){
-								tile_index % tiles_per_row * GAMEBOY_TILE_WIDTH,
-								tile_index / tiles_per_row * GAMEBOY_TILE_WIDTH,
-								GAMEBOY_TILE_WIDTH,
-								GAMEBOY_TILE_WIDTH,
-							};
-							
-							draw_solid = app_state.collision_map[y][x] == 1;
-						}
-						else {
-
-							SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);
-							
-							source_rect = (SDL_Rect){
-								app_state.draw_tile_index % tiles_per_row * GAMEBOY_TILE_WIDTH,
-								app_state.draw_tile_index / tiles_per_row * GAMEBOY_TILE_WIDTH,
-								GAMEBOY_TILE_WIDTH,
-								GAMEBOY_TILE_WIDTH,
-							};
-							//SDL_RenderCopy(renderer, app_state.tile_map_texture, &hot_rect, &dest_rect);
-
-							draw_solid = app_state.interaction_flags & INACT_DRAW_SOLID;
-						}
-
-						if (draw_solid) {
-							SDL_SetTextureColorMod( app_state.tile_map_texture, 255, 128, 0 );
+						if (solid_flag) {
+							SDL_SetTextureColorMod( app_state.tile_map_texture, 0, 128, 255 );
 						}
 						else {
 							SDL_SetTextureColorMod( app_state.tile_map_texture, 255, 255, 255 );
@@ -716,6 +653,7 @@ int main(int argc, char **argv) {
 						SDL_RenderCopy(renderer, app_state.tile_map_texture, &source_rect, &dest_rect);
 
 						if (is_hot_tile) {
+							SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);
 							SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
 							SDL_RenderDrawRect(renderer, &dest_rect);
 							SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -766,6 +704,8 @@ int main(int argc, char **argv) {
 				if (mouse_left_clicked) {
 					if (hot_tile_y > tiles_per_row) hot_tile_y = tiles_per_row - 1;
 					if (hot_tile_x > tiles_per_row) hot_tile_x = tiles_per_row - 1;
+
+					// TODO(jakob): Keep solid flag
 					app_state.draw_tile_index = (hot_tile_y * tiles_per_row) + hot_tile_x;
 				}
 			}
