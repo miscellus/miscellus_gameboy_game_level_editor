@@ -73,12 +73,14 @@ typedef struct View {
 typedef enum Interaction_Flags {
 	INACT_SELECTING = 0x1,
 	INACT_DRAGGING = 0x2,
-	INACT_EYEDROPPER = 0x4,
-	INACT_DRAW_SOLID = 0x8,
 } Interaction_Flags;
+
+#define level_width 32
+#define level_height 32
 
 typedef struct Application_State {
 	Application_Mode mode;
+
 	View view_edit;
 	View view_pick;
 
@@ -92,10 +94,7 @@ typedef struct Application_State {
 	u32 draw_tile_index;
 	Tile_Map tile_map;
 	SDL_Texture *tile_map_texture;
-	#define level_width 32
-	#define level_height 32
 	u32 level_map[level_height][level_width];
-	u8 _collision_map[level_height][level_width];
 
 	s32 window_width;
 	s32 window_height;
@@ -391,10 +390,10 @@ int main(int argc, char **argv) {
 	
 	load_tile_palette(&app_state, renderer, argv[1]);
 
-	b32 move_view_left;
-	b32 move_view_right;
-	b32 move_view_up;
-	b32 move_view_down;
+	b32 move_view_left = false;
+	b32 move_view_right = false;
+	b32 move_view_up = false;
+	b32 move_view_down = false;
 
 	SDL_Event e;
 	b32 quit = false;
@@ -694,15 +693,6 @@ int main(int argc, char **argv) {
 				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 				SDL_RenderCopy(renderer, app_state.tile_map_texture, NULL, &dest_rect);
 
-				SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);			
-				SDL_Rect hot_rect = {
-					hot_tile_x * scaled_tile_width + x_offset,
-					hot_tile_y * scaled_tile_width + y_offset,
-					scaled_tile_width,
-					scaled_tile_width,
-				};
-				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
-				SDL_RenderDrawRect(renderer, &hot_rect);
 
 				if (mouse_left_clicked && (hot_tile_y < tiles_per_row) && (hot_tile_x < tiles_per_row)) {
 					u32 solid_flag = app_state.draw_tile_index & (1 << 31);
@@ -715,6 +705,17 @@ int main(int argc, char **argv) {
 			default:
 				assert(0);
 		}
+
+
+		SDL_SetRenderDrawColor(renderer, 255, 255, 0, 200);
+		SDL_Rect hot_rect = {
+			hot_tile_x * scaled_tile_width + x_offset,
+			hot_tile_y * scaled_tile_width + y_offset,
+			scaled_tile_width,
+			scaled_tile_width,
+		};
+		SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+		SDL_RenderDrawRect(renderer, &hot_rect);
 
 		SDL_RenderSetScale(renderer, 1, 1);
 
