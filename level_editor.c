@@ -577,21 +577,6 @@ int main(int argc, char **argv) {
 		u32 hot_tile_x = (zoomed_mouse_x - x_offset) / scaled_tile_width;
 		u32 hot_tile_y = (zoomed_mouse_y - y_offset) / scaled_tile_width;
 
-		if (
-			hot_tile_x < level_width &&
-			hot_tile_y < level_height
-		) {
-			if (mouse_left_clicked) {
-				app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
-			}
-			else if (mouse_right_clicked) {
-				app_state.draw_tile_index = app_state.level_map[hot_tile_y][hot_tile_x];
-			}
-
-			if (do_fill) {
-				flood_fill(hot_tile_x, hot_tile_y, app_state.draw_tile_index, app_state.level_map);
-			}
-		}
 
 		SDL_Rect dest_rect;
 		SDL_Rect source_rect;
@@ -599,6 +584,24 @@ int main(int argc, char **argv) {
 		switch (app_state.mode) {
 			case APP_MODE_VIEW:
 			case APP_MODE_EDIT_LEVEL: {
+
+				if (
+					hot_tile_x < level_width &&
+					hot_tile_y < level_height
+				) {
+					if (mouse_left_clicked) {
+						app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
+					}
+					else if (mouse_right_clicked) {
+						app_state.draw_tile_index = app_state.level_map[hot_tile_y][hot_tile_x];
+					}
+
+					if (do_fill) {
+						flood_fill(hot_tile_x, hot_tile_y, app_state.draw_tile_index, app_state.level_map);
+					}
+				}
+
+
 
 				{ // Drop shadow
 					s32 border_radius = 6;
@@ -643,20 +646,19 @@ int main(int argc, char **argv) {
 							GAMEBOY_TILE_WIDTH,
 						};
 						
-						if (solid_flag) {
-							SDL_SetTextureColorMod( app_state.tile_map_texture, 0, 128, 255 );
-						}
-						else {
-							SDL_SetTextureColorMod( app_state.tile_map_texture, 255, 255, 255 );
-						}
-						
+						SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 						SDL_RenderCopy(renderer, app_state.tile_map_texture, &source_rect, &dest_rect);
+
+						if (solid_flag) {
+							SDL_SetRenderDrawColor(renderer, 0, 64, 128, 255);
+							SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
+							SDL_RenderFillRect(renderer, &dest_rect);
+						}
 
 						if (is_hot_tile) {
 							SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);
 							SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
 							SDL_RenderDrawRect(renderer, &dest_rect);
-							SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 						}
 
 					}
@@ -688,6 +690,8 @@ int main(int argc, char **argv) {
 					pixel_scale_factor * tile_map.pixels_per_row,
 					pixel_scale_factor * tile_map.pixels_per_row,
 				};
+
+				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 				SDL_RenderCopy(renderer, app_state.tile_map_texture, NULL, &dest_rect);
 
 				SDL_SetRenderDrawColor(renderer, 240, 240, 0, 200);			
@@ -699,14 +703,11 @@ int main(int argc, char **argv) {
 				};
 				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
 				SDL_RenderDrawRect(renderer, &hot_rect);
-				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-				if (mouse_left_clicked) {
-					if (hot_tile_y > tiles_per_row) hot_tile_y = tiles_per_row - 1;
-					if (hot_tile_x > tiles_per_row) hot_tile_x = tiles_per_row - 1;
-
-					// TODO(jakob): Keep solid flag
+				if (mouse_left_clicked && (hot_tile_y < tiles_per_row) && (hot_tile_x < tiles_per_row)) {
+					u32 solid_flag = app_state.draw_tile_index & (1 << 31);
 					app_state.draw_tile_index = (hot_tile_y * tiles_per_row) + hot_tile_x;
+					app_state.draw_tile_index |= solid_flag;
 				}
 			}
 			break;
