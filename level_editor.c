@@ -270,7 +270,7 @@ static b32 load_tile_palette(Application_State *app_state, SDL_Renderer *rendere
 	return true;
 }
 
-void flood_fill(u32 x, u32 y, u32 tile, u32 grid[LEVEL_HEIGHT][LEVEL_WIDTH]) {
+void draw_tile_flood_fill(u32 x, u32 y, u32 tile, u32 grid[LEVEL_HEIGHT][LEVEL_WIDTH]) {
 
 	u32 tile_to_fill_over = grid[y][x];
 
@@ -345,6 +345,74 @@ void flood_fill(u32 x, u32 y, u32 tile, u32 grid[LEVEL_HEIGHT][LEVEL_WIDTH]) {
 	}
 }
 
+void draw_tile_line(u32 x0, u32 y0, u32 x1, u32 y1, u32 tile, u32 grid[LEVEL_HEIGHT][LEVEL_WIDTH]) {
+
+	s32 dx = x1 - x0;
+	s32 dy = y1 - y0;
+	u32 x, x_end;
+	u32 y, y_end;
+	s32 sx, sy;
+
+	float error = 0;
+
+	if (abs(dx) > abs(dy)) {
+
+		sy = dy ? (dy > 0 ? 1 : -1) : 0;
+		
+		float delta_error = fabs((float)dy / (float)dx); // dx can not be 0 since condition is: '>'
+
+		if (dx > 0) {
+			x = x0;
+			y = y0;
+			x_end = x1;
+		}
+		else {
+			x = x1;
+			y = y1;
+			x_end = x0;
+			sy = -sy;
+		}
+
+		for (; x <= x_end; ++x) {
+			grid[y][x] = tile;
+			error += delta_error;
+
+			if (error > 0.5) {
+				y += sy;
+				error -= 1.0;
+			}
+		}
+	}
+	else {
+
+		sx = dx ? (dx > 0 ? 1 : -1) : 0;
+		
+		float delta_error = fabs((float)dx / (float)dy);
+
+		if (dy > 0) {
+			x = x0;
+			y = y0;
+			y_end = y1;
+		}
+		else {
+			x = x1;
+			y = y1;
+			y_end = y0;
+			sx = -sx;
+		}
+
+		for (; y <= y_end; ++y) {
+			grid[y][x] = tile;
+			error += delta_error;
+
+			if (error > 0.5) {
+				x += sx;
+				error -= 1.0;
+			}
+		}
+	}
+}
+
 static void screen_to_world_space(View *view, float screen_x, float screen_y, float *world_x, float *world_y) {
 	*world_x = screen_x / view->zoom + view->offset_x;
 	*world_y = screen_y / view->zoom + view->offset_y;
@@ -390,6 +458,20 @@ int main(int argc, char **argv) {
 			// app_state.collision_map[y][x] = 0;
 		}
 	}
+
+	// Test line drawing
+#if 0
+	for (int i = 0; i < 8; ++i) {
+		float angle = i/8.0 * 6.283185307179586;
+
+		u32 x1 = 16 + 15 * cos(angle);
+		u32 y1 = 16 + 15 * sin(angle);
+
+		app_state.level_map[y1][x1] = 1000;
+		draw_tile_line(15, 15, x1, y1, 400 | TILE_MASK_SOLID, app_state.level_map);
+
+	}
+#endif
 	
 	load_tile_palette(&app_state, renderer, argv[1]);
 
@@ -604,70 +686,8 @@ int main(int argc, char **argv) {
 					if (mouse_left_clicked) {
 						b32 mouse_previous_left_clicked = app_state.mouse_previous_flags & SDL_BUTTON(SDL_BUTTON_LEFT);
 
-						if (mouse_previous_left_clicked) {
-
-							s32 dx = hot_tile_x - hot_tile_previous_x;
-							s32 dy = hot_tile_y - hot_tile_previous_y;
-
-							s32 sx = dx ? (dx > 0 ? 1 : -1) : 0;
-
-							float error = 0;
-
-							if (abs(dx) > abs(dy)) {
-								float derror = fabs((float)dy / (float)dx); // dx can not be 0 since condition is: '>'
-
-								u32 xmin, xmax;
-
-								if (dx > 0) {
-									xmin = hot_tile_previous_x;
-									xmax = hot_tile_x;
-								}
-								else {
-									xmin = hot_tile_x;
-									xmax = hot_tile_previous_x;
-								}
-
-								u32 y = hot_tile_previous_y;
-								s32 sy = dy ? (dy > 0 ? 1 : -1) : 0;
-	
-								for (u32 x = xmin; x != xmax+1; ++x) {
-									app_state.level_map[x][y] = app_state.tile_to_draw;
-									error += derror;
-
-									if (error > 0.5) {
-										y += sy;
-										error -= 1.0;
-									}
-								}
-							}
-							else {
-								float derror = dy ? fabs((float)dx / (float)dy) : 1; // dx can not be 0 since condition is: '>'
-
-								u32 ymin, ymax;
-
-								if (dy > 0) {
-									ymin = hot_tile_previous_y;
-									ymax = hot_tile_y;
-								}
-								else {
-									ymin = hot_tile_y;
-									ymax = hot_tile_previous_y;
-								}
-
-								u32 x = hot_tile_previous_x;
-								s32 sx = dx ? (dx > 0 ? 1 : -1) : 0;
-	
-								for (u32 y = ymin; y != ymax+1; ++y) {
-									app_state.level_map[x][y] = app_state.tile_to_draw;
-									error += derror;
-
-									if (error > 0.5) {
-										x += sx;
-										error -= 1.0;
-									}
-								}
-							}
-
+						if (mouse_previous_left_clicked && hot_tile_previous_x < LEVEL_WIDTH && hot_tile_previous_y < LEVEL_HEIGHT) {
+							draw_tile_line(hot_tile_previous_x, hot_tile_previous_y, hot_tile_x, hot_tile_y, app_state.tile_to_draw, app_state.level_map);
 						}
 						else {
 							app_state.level_map[hot_tile_y][hot_tile_x] = app_state.tile_to_draw;
@@ -678,7 +698,7 @@ int main(int argc, char **argv) {
 					}
 
 					if (do_fill) {
-						flood_fill(hot_tile_x, hot_tile_y, app_state.tile_to_draw, app_state.level_map);
+						draw_tile_flood_fill(hot_tile_x, hot_tile_y, app_state.tile_to_draw, app_state.level_map);
 					}
 				}
 
@@ -765,7 +785,19 @@ int main(int argc, char **argv) {
 			break;
 
 			case APP_MODE_PICK_TILE: {
-				SDL_Rect dest_rect = {
+				// Drop shadow
+				s32 border_radius = 6;
+				dest_rect = (SDL_Rect){
+					canvas_offset_x - border_radius,
+					canvas_offset_y - border_radius,
+					pixel_scale_factor * app_state.tile_map.pixels_per_row + (2*border_radius),
+					pixel_scale_factor * app_state.tile_map.pixels_per_row + (2*border_radius)
+				};
+
+				SDL_SetRenderDrawColor(renderer, 0, 0, 0, 60);
+				SDL_RenderFillRect(renderer, &dest_rect);
+				
+				dest_rect = (SDL_Rect){
 					canvas_offset_x,
 					canvas_offset_y,
 					pixel_scale_factor * app_state.tile_map.pixels_per_row,
