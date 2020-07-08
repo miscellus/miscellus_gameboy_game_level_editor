@@ -33,8 +33,6 @@ typedef int check_sizesmm[sizeof(smm)==sizeof((void *)0) ? 1 : -1];
 #define GAMEBOY_TILE_WIDTH 8
 #define GAMEBOY_BYTES_PER_TILE (8*8*2/8)
 
-#define PIXEL_SCALE_FACTOR 3
-
 
 typedef struct Length_Buffer {
 	umm length;
@@ -47,14 +45,6 @@ typedef struct Tile_Map {
 	u32 pixels_per_row;
 	u32 *pixels;
 } Tile_Map;
-
-typedef struct Rectangular_Selection {
-	u32 min_tile_x;
-	u32 min_tile_y;
-	u32 max_tile_x;
-	u32 max_tile_y;
-} Rectangular_Selection;
-
 
 typedef enum Application_Mode {
 	APP_MODE_VIEW = 0,
@@ -70,13 +60,17 @@ typedef struct View {
 	float offset_y;
 } View;
 
-typedef enum Interaction_Flags {
-	INACT_SELECTING = 0x1,
-	INACT_DRAGGING = 0x2,
-} Interaction_Flags;
+typedef enum Action_Flags {
+	ACTION_SELECTING = 0x1,
+	ACTION_DRAGGING = 0x2,
+} Action_Flags;
 
-#define level_width 32
-#define level_height 32
+#define TILE_MASK_SOLID (1 << 31)
+#define TILE_MASK_INDEX (~TILE_MASK_SOLID)
+typedef u32 Tile;
+
+#define LEVEL_WIDTH 32
+#define LEVEL_HEIGHT 32
 
 typedef struct Application_State {
 	Application_Mode mode;
@@ -86,19 +80,23 @@ typedef struct Application_State {
 
 	SDL_Rect selection;
 	
-	Interaction_Flags interaction_flags;
+	Action_Flags interaction_flags;
 
 	s32 drag_start_x;
 	s32 drag_start_y;
 
-	u32 draw_tile_index;
+	Tile tile_to_draw;
 	Tile_Map tile_map;
 	SDL_Texture *tile_map_texture;
-	u32 level_map[level_height][level_width];
+	Tile level_map[LEVEL_HEIGHT][LEVEL_WIDTH];
 
 	s32 window_width;
 	s32 window_height;
 
+
+	s32 mouse_previous_x;
+	s32 mouse_previous_y;
+	u32 mouse_previous_flags;
 	s32 mouse_x;
 	s32 mouse_y;
 	u32 mouse_flags;
@@ -272,14 +270,14 @@ static b32 load_tile_palette(Application_State *app_state, SDL_Renderer *rendere
 	return true;
 }
 
-void flood_fill(u32 x, u32 y, u32 tile, u32 grid[level_height][level_width]) {
+void flood_fill(u32 x, u32 y, u32 tile, u32 grid[LEVEL_HEIGHT][LEVEL_WIDTH]) {
 
 	u32 tile_to_fill_over = grid[y][x];
 
 	if (tile_to_fill_over != tile) {
 
 		u32 stack_position = 0;
-		u32 stack[level_width*level_height];
+		u32 stack[LEVEL_WIDTH*LEVEL_HEIGHT];
 
 		for (;;) {
 
@@ -313,7 +311,7 @@ void flood_fill(u32 x, u32 y, u32 tile, u32 grid[level_height][level_width]) {
 					}
 				}
 
-				if (y < level_height-1) {
+				if (y < LEVEL_HEIGHT-1) {
 
 					b32 below_should_fill = (tile_to_fill_over == grid[y+1][x]);
 					
@@ -332,7 +330,7 @@ void flood_fill(u32 x, u32 y, u32 tile, u32 grid[level_height][level_width]) {
 				if (tile_to_fill_over != grid[y][x]) {
 					break;
 				}
-			} while (x < level_width);
+			} while (x < LEVEL_WIDTH);
 			
 			if (stack_position >= 2) {
 				do {
@@ -345,6 +343,11 @@ void flood_fill(u32 x, u32 y, u32 tile, u32 grid[level_height][level_width]) {
 			}
 		}
 	}
+}
+
+static void screen_to_world_space(View *view, float screen_x, float screen_y, float *world_x, float *world_y) {
+	*world_x = screen_x / view->zoom + view->offset_x;
+	*world_y = screen_y / view->zoom + view->offset_y;
 }
 
 int main(int argc, char **argv) {
@@ -376,13 +379,13 @@ int main(int argc, char **argv) {
 
 	Application_State app_state = {0};
 	app_state.mode = APP_MODE_EDIT_LEVEL;
-	app_state.draw_tile_index = 0;
+	app_state.tile_to_draw = 0;
 	app_state.view_edit.zoom = 1;
 	app_state.view_pick.zoom = 1;
 	app_state.selection = (SDL_Rect){10, 10, 5, 10};
 
-	for (s32 y = 0; y < level_height; ++y) {
-		for (s32 x = 0; x < level_width; ++x) {
+	for (s32 y = 0; y < LEVEL_HEIGHT; ++y) {
+		for (s32 x = 0; x < LEVEL_WIDTH; ++x) {
 			app_state.level_map[y][x] = 0; //!(x&y&1);
 			// app_state.collision_map[y][x] = 0;
 		}
@@ -395,18 +398,29 @@ int main(int argc, char **argv) {
 	b32 move_view_up = false;
 	b32 move_view_down = false;
 
+	u32 hot_tile_x = 0;
+	u32 hot_tile_y = 0;
+	u32 hot_tile_previous_x;
+	u32 hot_tile_previous_y;
+
 	SDL_Event e;
 	b32 quit = false;
 	while (!quit){
 
 		enum {DRAG_NO_CHANGE, DRAG_START, DRAG_STOP} drag_update = DRAG_NO_CHANGE;
 
+		app_state.mouse_previous_flags = app_state.mouse_flags;
+		app_state.mouse_previous_x = app_state.mouse_x;
+		app_state.mouse_previous_y = app_state.mouse_y;
+
 		SDL_GetWindowSize(window, &app_state.window_width, &app_state.window_height);
 		app_state.mouse_flags = SDL_GetMouseState(&app_state.mouse_x, &app_state.mouse_y);
 
 		View *view = get_current_view(&app_state);
-		float world_mouse_x = (float)app_state.mouse_x / (float)view->zoom + view->offset_x;
-		float world_mouse_y = (float)app_state.mouse_y / (float)view->zoom + view->offset_y;
+
+		float world_mouse_x;
+		float world_mouse_y;
+		screen_to_world_space(view, app_state.mouse_x, app_state.mouse_y, &world_mouse_x, &world_mouse_y);
 
 		b32 do_fill = false;
 
@@ -442,7 +456,7 @@ int main(int argc, char **argv) {
 						}
 						else if (app_state.mode == APP_MODE_EDIT_LEVEL) {
 							// Toggle draw solid
-							app_state.draw_tile_index ^= (1 << 31);
+							app_state.tile_to_draw ^= TILE_MASK_SOLID;
 						}
 					}
 					break;
@@ -471,7 +485,7 @@ int main(int argc, char **argv) {
 					case SDLK_DOWN: move_view_down = true; break;
 
 					case SDLK_SPACE: {
-						if (!(app_state.interaction_flags & INACT_DRAGGING)) drag_update = DRAG_START;
+						if (!(app_state.interaction_flags & ACTION_DRAGGING)) drag_update = DRAG_START;
 					}
 					break;
 				}
@@ -484,7 +498,7 @@ int main(int argc, char **argv) {
 					case SDLK_DOWN: move_view_down = false; break;
 
 					case SDLK_SPACE: {
-						if (app_state.interaction_flags & INACT_DRAGGING) drag_update = DRAG_STOP;
+						if (app_state.interaction_flags & ACTION_DRAGGING) drag_update = DRAG_STOP;
 					}
 				}
 			}
@@ -500,8 +514,8 @@ int main(int argc, char **argv) {
 				}
 
 				// Adjust view position (Zoom like in Gimp)
-				float world_view_width = (float)app_state.window_width / (float)view->zoom;
-				float world_view_height = (float)app_state.window_height / (float)view->zoom;
+				float world_view_width = (float)app_state.window_width / view->zoom;
+				float world_view_height = (float)app_state.window_height / view->zoom;
 				float x01 = (float)app_state.mouse_x / (float)app_state.window_width;
 				float y01 = (float)app_state.mouse_y / (float)app_state.window_height;
 				view->offset_x = world_mouse_x - x01*world_view_width; 
@@ -526,15 +540,15 @@ int main(int argc, char **argv) {
 
 
 		if (drag_update == DRAG_START) {
-			app_state.interaction_flags |= INACT_DRAGGING;
+			app_state.interaction_flags |= ACTION_DRAGGING;
 			app_state.drag_start_x = world_mouse_x;
 			app_state.drag_start_y = world_mouse_y;
 
 		}
 		else if (drag_update == DRAG_STOP) {
-			app_state.interaction_flags &= ~INACT_DRAGGING;
-			view->offset_x -= world_mouse_x - app_state.drag_start_x;
-			view->offset_y -= world_mouse_y - app_state.drag_start_y;
+			app_state.interaction_flags &= ~ACTION_DRAGGING;
+			view->offset_x += app_state.drag_start_x - world_mouse_x;
+			view->offset_y += app_state.drag_start_y - world_mouse_y;
 		}
 
 		const float view_speed = 16.0f / view->zoom;
@@ -556,26 +570,25 @@ int main(int argc, char **argv) {
 		if (pixel_scale_factor <= 0) pixel_scale_factor = 1;
 		s32 scaled_tile_width = pixel_scale_factor * GAMEBOY_TILE_WIDTH;	
 
-		Tile_Map tile_map = app_state.tile_map;
+		const u32 tiles_per_row = app_state.tile_map.pixels_per_row / GAMEBOY_TILE_WIDTH; 
 
-		const u32 tiles_per_row = tile_map.pixels_per_row / GAMEBOY_TILE_WIDTH; 
+		const u32 level_width_pixels = LEVEL_WIDTH * scaled_tile_width;
 
-		const u32 level_width_pixels = level_width * scaled_tile_width;
+		float effective_view_offset_x = view->offset_x;
+		float effective_view_offset_y = view->offset_y;
 
-		s32 x_offset = (app_state.window_width/2 - level_width_pixels/2) - view->offset_x;
-		s32 y_offset = (app_state.window_height/2 - level_width_pixels/2) - view->offset_y;
-
-		float zoomed_mouse_x = ((float)app_state.mouse_x / (float)view->zoom);
-		float zoomed_mouse_y = ((float)app_state.mouse_y / (float)view->zoom);
-
-		if (app_state.interaction_flags & INACT_DRAGGING) {
-			x_offset += zoomed_mouse_x + view->offset_x - app_state.drag_start_x;
-			y_offset += zoomed_mouse_y + view->offset_y - app_state.drag_start_y;
+		if (app_state.interaction_flags & ACTION_DRAGGING) {
+			effective_view_offset_x += app_state.drag_start_x - world_mouse_x;
+			effective_view_offset_y += app_state.drag_start_y - world_mouse_y;
 		}
 
-		u32 hot_tile_x = (zoomed_mouse_x - x_offset) / scaled_tile_width;
-		u32 hot_tile_y = (zoomed_mouse_y - y_offset) / scaled_tile_width;
+		s32 canvas_offset_x = (app_state.window_width/2 - level_width_pixels/2) - effective_view_offset_x;
+		s32 canvas_offset_y = (app_state.window_height/2 - level_width_pixels/2) - effective_view_offset_y;
 
+		hot_tile_previous_x = hot_tile_x;
+		hot_tile_previous_y = hot_tile_y;
+		hot_tile_x = (((float)app_state.mouse_x / view->zoom) - canvas_offset_x) / scaled_tile_width;
+		hot_tile_y = (((float)app_state.mouse_y / view->zoom) - canvas_offset_y) / scaled_tile_width;
 
 		SDL_Rect dest_rect;
 		SDL_Rect source_rect;
@@ -585,18 +598,87 @@ int main(int argc, char **argv) {
 			case APP_MODE_EDIT_LEVEL: {
 
 				if (
-					hot_tile_x < level_width &&
-					hot_tile_y < level_height
+					hot_tile_x < LEVEL_WIDTH &&
+					hot_tile_y < LEVEL_HEIGHT
 				) {
 					if (mouse_left_clicked) {
-						app_state.level_map[hot_tile_y][hot_tile_x] = app_state.draw_tile_index;
+						b32 mouse_previous_left_clicked = app_state.mouse_previous_flags & SDL_BUTTON(SDL_BUTTON_LEFT);
+
+						if (mouse_previous_left_clicked) {
+
+							s32 dx = hot_tile_x - hot_tile_previous_x;
+							s32 dy = hot_tile_y - hot_tile_previous_y;
+
+							s32 sx = dx ? (dx > 0 ? 1 : -1) : 0;
+
+							float error = 0;
+
+							if (abs(dx) > abs(dy)) {
+								float derror = fabs((float)dy / (float)dx); // dx can not be 0 since condition is: '>'
+
+								u32 xmin, xmax;
+
+								if (dx > 0) {
+									xmin = hot_tile_previous_x;
+									xmax = hot_tile_x;
+								}
+								else {
+									xmin = hot_tile_x;
+									xmax = hot_tile_previous_x;
+								}
+
+								u32 y = hot_tile_previous_y;
+								s32 sy = dy ? (dy > 0 ? 1 : -1) : 0;
+	
+								for (u32 x = xmin; x != xmax+1; ++x) {
+									app_state.level_map[x][y] = app_state.tile_to_draw;
+									error += derror;
+
+									if (error > 0.5) {
+										y += sy;
+										error -= 1.0;
+									}
+								}
+							}
+							else {
+								float derror = dy ? fabs((float)dx / (float)dy) : 1; // dx can not be 0 since condition is: '>'
+
+								u32 ymin, ymax;
+
+								if (dy > 0) {
+									ymin = hot_tile_previous_y;
+									ymax = hot_tile_y;
+								}
+								else {
+									ymin = hot_tile_y;
+									ymax = hot_tile_previous_y;
+								}
+
+								u32 x = hot_tile_previous_x;
+								s32 sx = dx ? (dx > 0 ? 1 : -1) : 0;
+	
+								for (u32 y = ymin; y != ymax+1; ++y) {
+									app_state.level_map[x][y] = app_state.tile_to_draw;
+									error += derror;
+
+									if (error > 0.5) {
+										x += sx;
+										error -= 1.0;
+									}
+								}
+							}
+
+						}
+						else {
+							app_state.level_map[hot_tile_y][hot_tile_x] = app_state.tile_to_draw;
+						}
 					}
 					else if (mouse_right_clicked) {
-						app_state.draw_tile_index = app_state.level_map[hot_tile_y][hot_tile_x];
+						app_state.tile_to_draw = app_state.level_map[hot_tile_y][hot_tile_x];
 					}
 
 					if (do_fill) {
-						flood_fill(hot_tile_x, hot_tile_y, app_state.draw_tile_index, app_state.level_map);
+						flood_fill(hot_tile_x, hot_tile_y, app_state.tile_to_draw, app_state.level_map);
 					}
 				}
 
@@ -605,18 +687,18 @@ int main(int argc, char **argv) {
 				{ // Drop shadow
 					s32 border_radius = 6;
 					dest_rect = (SDL_Rect){
-						x_offset - border_radius,
-						y_offset - border_radius,
-						scaled_tile_width*level_width + (2*border_radius),
-						scaled_tile_width*level_height + (2*border_radius)
+						canvas_offset_x - border_radius,
+						canvas_offset_y - border_radius,
+						scaled_tile_width*LEVEL_WIDTH + (2*border_radius),
+						scaled_tile_width*LEVEL_HEIGHT + (2*border_radius)
 					};
 
 					SDL_SetRenderDrawColor(renderer, 0, 0, 0, 60);
 					SDL_RenderFillRect(renderer, &dest_rect);
 				}
 
-				for (u32 y = 0; y < level_height; ++y) {
-					for (u32 x = 0; x < level_width; ++x) {
+				for (u32 y = 0; y < LEVEL_HEIGHT; ++y) {
+					for (u32 x = 0; x < LEVEL_WIDTH; ++x) {
 
 						b32 is_hot_tile = (app_state.mode == APP_MODE_EDIT_LEVEL && x == hot_tile_x && y == hot_tile_y);
 
@@ -626,15 +708,15 @@ int main(int argc, char **argv) {
 							tile_index = app_state.level_map[y][x];
 						}
 						else {
-							tile_index = app_state.draw_tile_index;
+							tile_index = app_state.tile_to_draw;
 						}
 						
-						u32 solid_flag = tile_index & (1 << 31);
-						tile_index &= ~(1 << 31);
+						u32 solid_flag = tile_index & TILE_MASK_SOLID;
+						tile_index &= TILE_MASK_INDEX;
 
 						dest_rect = (SDL_Rect){
-							x * scaled_tile_width + x_offset,
-							y * scaled_tile_width + y_offset,
+							x * scaled_tile_width + canvas_offset_x,
+							y * scaled_tile_width + canvas_offset_y,
 							scaled_tile_width,
 							scaled_tile_width,
 						};
@@ -663,7 +745,7 @@ int main(int argc, char **argv) {
 					}
 				}
 
-				if (app_state.interaction_flags & INACT_SELECTING) {
+				if (app_state.interaction_flags & ACTION_SELECTING) {
 					SDL_Rect selection = app_state.selection;
 
 					selection.x *= scaled_tile_width;
@@ -671,8 +753,8 @@ int main(int argc, char **argv) {
 					selection.w *= scaled_tile_width;
 					selection.h *= scaled_tile_width;
 
-					selection.x += x_offset;
-					selection.y += y_offset;
+					selection.x += canvas_offset_x;
+					selection.y += canvas_offset_y;
 
 					SDL_SetRenderDrawColor(renderer, 0, 150, 200, 192);
 					SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
@@ -684,10 +766,10 @@ int main(int argc, char **argv) {
 
 			case APP_MODE_PICK_TILE: {
 				SDL_Rect dest_rect = {
-					x_offset,
-					y_offset,
-					pixel_scale_factor * tile_map.pixels_per_row,
-					pixel_scale_factor * tile_map.pixels_per_row,
+					canvas_offset_x,
+					canvas_offset_y,
+					pixel_scale_factor * app_state.tile_map.pixels_per_row,
+					pixel_scale_factor * app_state.tile_map.pixels_per_row,
 				};
 
 				SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -695,9 +777,9 @@ int main(int argc, char **argv) {
 
 
 				if (mouse_left_clicked && (hot_tile_y < tiles_per_row) && (hot_tile_x < tiles_per_row)) {
-					u32 solid_flag = app_state.draw_tile_index & (1 << 31);
-					app_state.draw_tile_index = (hot_tile_y * tiles_per_row) + hot_tile_x;
-					app_state.draw_tile_index |= solid_flag;
+					u32 solid_flag = app_state.tile_to_draw & TILE_MASK_SOLID;
+					app_state.tile_to_draw = (hot_tile_y * tiles_per_row) + hot_tile_x;
+					app_state.tile_to_draw |= solid_flag;
 				}
 			}
 			break;
@@ -709,8 +791,8 @@ int main(int argc, char **argv) {
 
 		SDL_SetRenderDrawColor(renderer, 255, 255, 0, 200);
 		SDL_Rect hot_rect = {
-			hot_tile_x * scaled_tile_width + x_offset,
-			hot_tile_y * scaled_tile_width + y_offset,
+			hot_tile_x * scaled_tile_width + canvas_offset_x,
+			hot_tile_y * scaled_tile_width + canvas_offset_y,
 			scaled_tile_width,
 			scaled_tile_width,
 		};
