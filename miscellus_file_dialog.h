@@ -51,13 +51,13 @@ int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
 		g_free(filename);
 	}
 
-    // while (gtk_events_pending()) gtk_main_iteration();
+	// while (gtk_events_pending()) gtk_main_iteration();
 #if 1
-    gtk_widget_destroy(dialog);
+	gtk_widget_destroy(dialog);
 #else
 	g_object_unref(dialog);
 #endif
-    while (gtk_events_pending()) gtk_main_iteration();
+	while (gtk_events_pending()) gtk_main_iteration();
 
 	return did_succeed;
 }
@@ -65,7 +65,34 @@ int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
 #elif defined(__APPLE__) && defined(__MACH__)
 #error "MacOS not yet supported"
 #elif defined(_WIN32) || defined(WIN32)
-#error "Windows not yet supported"
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <commdlg.h>
+
+int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
+	
+	OPENFILENAME open_dialog;
+
+	ZeroMemory(&open_dialog, sizeof(open_dialog));
+	open_dialog.lStructSize = sizeof(open_dialog);
+	open_dialog.hwndOwner = NULL;
+	open_dialog.lpstrFile = out_path;
+	// Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
+	// use the contents of szFile to initialize itself.
+	open_dialog.lpstrFile[0] = '\0';
+	open_dialog.nMaxFile = out_path_max_length;
+	open_dialog.lpstrFilter = "All\0*.*\0Binary\0*.bin\0";
+	open_dialog.nFilterIndex = 1;
+	open_dialog.lpstrFileTitle = NULL;
+	open_dialog.nMaxFileTitle = 0;
+	open_dialog.lpstrInitialDir = NULL;
+	open_dialog.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+	// Display the Open dialog box.
+	return (TRUE == GetOpenFileName(&open_dialog));
+}
+
 #endif 
 
 
