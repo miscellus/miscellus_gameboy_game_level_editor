@@ -459,16 +459,16 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	// Test line drawing
 #if 0
-	for (int i = 0; i < 8; ++i) {
-		float angle = i/8.0 * 6.283185307179586;
+	// Test line drawing
+	for (int i = 0; i < 24; ++i) {
+		float angle = i/24.0 * 6.283185307179586;
 
-		u32 x1 = 16 + 15 * cos(angle);
-		u32 y1 = 16 + 15 * sin(angle);
+		u32 x1 = 15.5 + 15 * cos(angle);
+		u32 y1 = 15.5 + 15 * sin(angle);
 
 		app_state.level_map[y1][x1] = 1000;
-		draw_tile_line(15, 15, x1, y1, 400 | TILE_MASK_SOLID, app_state.level_map);
+		draw_tile_line(15.5, 15.5, x1, y1, i * 150 | TILE_MASK_SOLID, app_state.level_map);
 
 	}
 #endif
