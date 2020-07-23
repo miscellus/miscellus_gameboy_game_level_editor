@@ -1,7 +1,7 @@
 #ifndef MISCELLUS_FILE_DIALOG_H
 #define MISCELLUS_FILE_DIALOG_H
 
-int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length);
+int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length, int save);
 
 #ifdef MFD_IMPLEMENTATION
 
@@ -15,7 +15,7 @@ extern "C"
 #include <string.h>
 #include <gtk/gtk.h>
 
-int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
+int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length, int save) {
 
 	if ( !gtk_init_check( NULL, NULL ) ) {
 		return 0;
@@ -24,10 +24,10 @@ int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
 	GtkWidget *dialog = gtk_file_chooser_dialog_new(
 		"Open File",
 		GTK_WINDOW(NULL),
-		GTK_FILE_CHOOSER_ACTION_OPEN,
+		save ? GTK_FILE_CHOOSER_ACTION_SAVE : GTK_FILE_CHOOSER_ACTION_OPEN,
 		"_Cancel",
 		GTK_RESPONSE_CANCEL,
-		"_Open",
+		save ? "_Save" : "_Open",
 		GTK_RESPONSE_ACCEPT,
 		NULL);
 
@@ -39,12 +39,12 @@ int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
 
 	int res = gtk_dialog_run(GTK_DIALOG(dialog));
 	if (res == GTK_RESPONSE_ACCEPT) {
-		
+
 		GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
 		char *filename = gtk_file_chooser_get_filename(chooser);
 		int unsigned copy_amount = strlen(filename)+1;
 
-		if (copy_amount <= out_path_max_length) {			
+		if (copy_amount <= out_path_max_length) {
 			memcpy(out_path, filename, copy_amount);
 			did_succeed = 1;
 		}
@@ -70,15 +70,15 @@ int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
 #include <windows.h>
 #include <commdlg.h>
 
-int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
-	
+int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length, int save) {
+
 	OPENFILENAME open_dialog;
 
 	ZeroMemory(&open_dialog, sizeof(open_dialog));
 	open_dialog.lStructSize = sizeof(open_dialog);
 	open_dialog.hwndOwner = NULL;
 	open_dialog.lpstrFile = out_path;
-	// Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
+	// Set lpstrFile[0] to '\0' so that GetOpenFileName does not
 	// use the contents of szFile to initialize itself.
 	open_dialog.lpstrFile[0] = '\0';
 	open_dialog.nMaxFile = out_path_max_length;
@@ -93,7 +93,7 @@ int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length) {
 	return (TRUE == GetOpenFileName(&open_dialog));
 }
 
-#endif 
+#endif
 
 
 #ifdef __cplusplus

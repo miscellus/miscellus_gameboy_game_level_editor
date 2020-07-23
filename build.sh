@@ -3,7 +3,7 @@
 set -e
 
 compile_flags=("
--O0 
+-O0
 -ggdb
 -Wall
 -Wextra
@@ -22,5 +22,5 @@ $(pkg-config --libs gtk+-3.0)
 
 gcc $compile_flags level_editor.c -o level_editor.program $link_flags
 
-./level_editor.program level_editor.program
+./level_editor.program tileset.bin
 # termite -e "bash -c './level_editor.program'"
