@@ -773,17 +773,11 @@ int main(int argc, char **argv) {
 
 				switch(e.key.keysym.sym) {
 
-					case SDLK_ESCAPE:
-					case SDLK_q: {
-						quit = true;
-					}
-					break;
-
 					case SDLK_o: {
 						if (e.key.keysym.mod & KMOD_CTRL) {
 							char file_path[1024];
 
-							if (miscellus_file_dialog(file_path, 1024, false)) {
+							if (miscellus_file_dialog(file_path, sizeof(file_path), false)) {
 								// load_tile_palette(&app_state, renderer, file_path);
 								load_level_binary(&app_state.level_grid, file_path);
 							}
@@ -794,7 +788,7 @@ int main(int argc, char **argv) {
 					case SDLK_s: {
 						if (e.key.keysym.mod & KMOD_CTRL) {
 							char file_path[1024];
-							if (miscellus_file_dialog(file_path, 1024, true)) {
+							if (miscellus_file_dialog(file_path, sizeof(file_path), true)) {
 								save_level_binary(&app_state.level_grid, file_path);
 							}
 

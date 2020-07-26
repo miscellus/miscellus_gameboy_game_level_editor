@@ -22,7 +22,7 @@ int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length, int 
 	}
 
 	GtkWidget *dialog = gtk_file_chooser_dialog_new(
-		"Open File",
+		save ? "Save" : "Open",
 		GTK_WINDOW(NULL),
 		save ? GTK_FILE_CHOOSER_ACTION_SAVE : GTK_FILE_CHOOSER_ACTION_OPEN,
 		"_Cancel",
@@ -71,6 +71,9 @@ int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length, int 
 #include <commdlg.h>
 
 int miscellus_file_dialog(char *out_path, int unsigned out_path_max_length, int save) {
+
+	// TODO(jakob): implement save dialog for windows
+	if (save) return false;
 
 	OPENFILENAME open_dialog;
 

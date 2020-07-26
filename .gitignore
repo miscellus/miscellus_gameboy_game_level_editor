@@ -2,3 +2,5 @@ Fonts/*
 *.program
 *.sublime-*
 .gdb_history
+*.bin
+*.lvl
